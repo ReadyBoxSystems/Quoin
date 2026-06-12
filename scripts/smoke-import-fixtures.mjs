@@ -9,6 +9,12 @@ const fixtureFiles = [
   "import-test-04-multi-sheet-cross-sheet.xlsx",
   "import-test-05-reference-table-style.xlsx",
   "import-test-06-review-warnings.xlsx",
+  "import-test-07-workbook-sheets.xlsx",
+  "import-test-08-open-selected-sheet.xlsx",
+  "import-test-09-names-across-sheets.xlsx",
+  "import-test-10-sheet-names-with-spaces.xlsx",
+  "import-test-11-sparse-large-sheet.xlsx",
+  "import-test-12-workbook-review-mix.xlsx",
 ];
 
 for (const fileName of fixtureFiles) {
