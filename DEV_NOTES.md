@@ -207,6 +207,9 @@ Rules:
 - Main component: `components/variable-sheet.tsx`
 - Engine: `lib/engine/index.ts`
 - Engine tests: `lib/engine/engine.test.ts`
+- Git remote: `https://github.com/ReadyBoxSystems/Quoin.git`
+- Primary branch: `main`
+- Baseline commit: `5259f17 Initial Quoin prototype baseline`
 - Local configuration storage keys currently live in the component.
 - Local configurations include sheet dimensions for row/column changes.
 - Excel import creates a new local configuration by default instead of overwriting the current one.

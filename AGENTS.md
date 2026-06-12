@@ -19,6 +19,30 @@ The product direction is:
 
 Reference docs are stored in `docs/reference/`.
 
+## Source Control
+
+This project is now tracked in Git from this folder:
+
+```text
+C:\Quoin - Codex
+```
+
+Remote:
+
+```text
+https://github.com/ReadyBoxSystems/Quoin.git
+```
+
+Use `main` as the primary branch.
+
+The baseline commit is:
+
+```text
+5259f17 Initial Quoin prototype baseline
+```
+
+Do not commit generated folders such as `.next`, `node_modules`, `out`, or `dist`.
+
 ## How To Run
 
 The preferred user entry point is:

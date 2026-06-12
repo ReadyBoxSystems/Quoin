@@ -84,10 +84,13 @@ Current progress:
 - post-import summary/report exists
 - root `import-test-*.xlsx` fixtures exist
 - fixture smoke-test script exists
+- manual browser fixture results are captured in `Quoin test notes.md`
+- private GitHub baseline is established before the next import model changes
 
 Next work:
 
-- manually test all root fixture workbooks in the browser UI
+- design Quoin's workbook structure for multi-sheet imports and reference-table-like data
+- update import flow so workbook structure is preserved instead of flattening to one selected worksheet only
 - improve import review copy and empty/error states after testing
 - decide whether imported named cells should be surfaced automatically or remain unsurfaced by default
 - add guided repair affordances for common review items

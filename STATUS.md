@@ -4,6 +4,14 @@
 
 Quoin is now a clean build in this folder.
 
+The project is now tracked in the private GitHub repository:
+
+```text
+https://github.com/ReadyBoxSystems/Quoin.git
+```
+
+The local working branch is `main`, tracking `origin/main`. The first pushed baseline is commit `5259f17` (`Initial Quoin prototype baseline`).
+
 The prototype has the right core shape:
 
 - spreadsheet-style grid with column letters and row numbers
@@ -31,6 +39,7 @@ The prototype has the right core shape:
 - Help tab
 - generic fake-data `Demo - Beam Selection` workflow
 - double-click launcher via `Quoin.bat`
+- private GitHub repository initialized and pushed
 
 ## What Works
 
@@ -107,9 +116,9 @@ These were passing after the latest changes.
 
 Manual testing still needed:
 
-- Run the root `import-test-*.xlsx` files through the browser import UI.
-- Confirm the import summaries and review items match `IMPORT_TEST_FILES.md`.
-- Check that each import creates a new local configuration and does not overwrite existing work.
+- Treat root `import-test-*.xlsx` browser results in `Quoin test notes.md` as the latest manual import pass.
+- Use the manual results to design workbook structure for multi-sheet imports and reference-table-like data.
+- Re-run the fixture sequence after workbook-structure changes.
 
 ## Open UX Notes
 
