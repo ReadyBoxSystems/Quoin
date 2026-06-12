@@ -76,9 +76,10 @@ Current progress:
 - imported-sheet converter exists in `lib/import/convert.ts`
 - `Import Excel` button exists in the toolbar
 - `.xlsx` files can be read in the browser
-- user can choose one worksheet from a workbook
+- user can choose which Sheet to open first
 - imported values and formulas are preserved in the grid
 - imports create new local configurations by default
+- imported workbook sheets are preserved as Quoin Sheets
 - safe workbook-defined single-cell names can become Smart Cell names
 - named ranges and unsupported/risky formula patterns produce review items
 - post-import summary/report exists
@@ -89,13 +90,13 @@ Current progress:
 
 Next work:
 
-- design Quoin's workbook structure for multi-sheet imports and reference-table-like data
-- update import flow so workbook structure is preserved instead of flattening to one selected worksheet only
+- refine Sheet controls, naming, and visual polish after browser testing
+- decide whether Runner Preview should gather surfaced Smart Cells from all Sheets or only the active Sheet
+- design reference-table promotion from imported Sheets or ranges
 - improve import review copy and empty/error states after testing
 - decide whether imported named cells should be surfaced automatically or remain unsurfaced by default
 - add guided repair affordances for common review items
 - consider import of basic Excel data validation lists into runner input options
-- consider whether multi-sheet workbooks should become future Quoin workbook tabs or reference tables
 - expand formula compatibility based on real imported calculators
 
 ## Phase 2.5 - Demo Readiness

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { executeEngine, type CellValue, type EngineCell, type SmartCellRole, type SmartCellType } from "@/lib/engine";
 import { convertImportedSheetToQuoin } from "@/lib/import/convert";
 import type { ImportedName, ImportedWorkbook, ImportReviewItem } from "@/lib/import/types";
-import type { GridCell, LocalConfiguration, LookupConfig, SheetSnapshot } from "@/lib/sheet/types";
+import type { GridCell, LocalConfiguration, LookupConfig, SheetSnapshot, WorkbookSheet } from "@/lib/sheet/types";
 
 const STORAGE_KEY = "quoin.gridSheet.v2";
 const CONFIG_STORAGE_KEY = "quoin.configurations.v1";
@@ -29,6 +29,7 @@ interface DependencySummary {
 interface ImportReport {
   fileName: string;
   sheetName: string;
+  sheetCount: number;
   cellCount: number;
   formulaCount: number;
   promotedNameCount: number;
@@ -190,6 +191,8 @@ const initialCells: Record<string, GridCell> = {
 };
 
 export function VariableSheet() {
+  const [sheets, setSheets] = useState<WorkbookSheet[]>(() => [makeWorkbookSheet("Sheet 1", initialCells, defaultColumnCount, defaultRowCount)]);
+  const [activeSheetId, setActiveSheetId] = useState("");
   const [cells, setCells] = useState<Record<string, GridCell>>(initialCells);
   const [columnCount, setColumnCount] = useState(defaultColumnCount);
   const [rowCount, setRowCount] = useState(defaultRowCount);
@@ -216,6 +219,7 @@ export function VariableSheet() {
   const editInputRef = useRef<HTMLInputElement>(null);
   const cellRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
+  const activeSheet = useMemo(() => sheets.find((sheet) => sheet.id === activeSheetId) ?? sheets[0] ?? null, [activeSheetId, sheets]);
   const columns = useMemo(() => makeColumns(columnCount), [columnCount]);
   const selectedCell = getCell(cells, selectedAddress);
   const engineCells = useMemo(() => toEngineCells(cells), [cells]);
@@ -266,6 +270,8 @@ export function VariableSheet() {
       setConfigurations(nextConfigurations);
       setActiveConfigId(activeConfig.id);
       setConfigName(activeConfig.name);
+      setSheets(activeConfig.sheets ?? [sheetFromConfiguration(activeConfig)]);
+      setActiveSheetId(activeConfig.activeSheetId ?? activeConfig.sheets?.[0]?.id ?? "");
       setCells(activeConfig.cells);
       setColumnCount(activeConfig.columnCount ?? defaultColumnCount);
       setRowCount(activeConfig.rowCount ?? defaultRowCount);
@@ -652,22 +658,45 @@ export function VariableSheet() {
     setDraftEntry("");
   }
 
+  function currentWorkbookSheets(): WorkbookSheet[] {
+    if (sheets.length === 0) return [makeWorkbookSheet("Sheet 1", cells, columnCount, rowCount)];
+    return sheets.map((sheet) => (
+      sheet.id === activeSheetId
+        ? { ...sheet, cells: hydrateCells(cells), columnCount, rowCount }
+        : sheet
+    ));
+  }
+
   function saveConfiguration() {
     const name = configName.trim() || "Untitled Configuration";
     const updatedAt = new Date().toISOString();
     let nextActiveConfigId = activeConfigId;
+    const nextSheets = currentWorkbookSheets();
+    const nextActiveSheet = nextSheets.find((sheet) => sheet.id === activeSheetId) ?? nextSheets[0];
 
     setConfigurations((current) => {
       const existing = current.find((configuration) => configuration.id === activeConfigId);
       if (!existing) {
-        const created = makeConfiguration(name, cells, columnCount, rowCount);
+        const created = makeConfiguration(name, nextActiveSheet.cells, nextActiveSheet.columnCount, nextActiveSheet.rowCount, {
+          sheets: nextSheets,
+          activeSheetId: nextActiveSheet.id,
+        });
         nextActiveConfigId = created.id;
         return [...current, created];
       }
 
       return current.map((configuration) => {
         if (configuration.id !== activeConfigId) return configuration;
-        return { ...configuration, name, cells, columnCount, rowCount, updatedAt };
+        return {
+          ...configuration,
+          name,
+          activeSheetId: nextActiveSheet.id,
+          sheets: nextSheets,
+          cells: nextActiveSheet.cells,
+          columnCount: nextActiveSheet.columnCount,
+          rowCount: nextActiveSheet.rowCount,
+          updatedAt,
+        };
       });
     });
 
@@ -712,13 +741,24 @@ export function VariableSheet() {
 
   function createConfiguration() {
     if (!confirmDiscardUnsaved()) return;
-    const created = makeConfiguration("Untitled Configuration", {}, defaultColumnCount, defaultRowCount);
+    const firstSheet = makeWorkbookSheet("Sheet 1", {}, defaultColumnCount, defaultRowCount);
+    const created = makeConfiguration("Untitled Configuration", firstSheet.cells, firstSheet.columnCount, firstSheet.rowCount, {
+      sheets: [firstSheet],
+      activeSheetId: firstSheet.id,
+    });
     setConfigurations((current) => [...current, created]);
     loadConfiguration(created);
   }
 
   function duplicateConfiguration() {
-    const created = makeConfiguration(`${configName.trim() || "Configuration"} Copy`, cells, columnCount, rowCount);
+    const sourceSheets = currentWorkbookSheets();
+    const nextSheets = sourceSheets.map((sheet) => ({ ...sheet, id: makeSheetId() }));
+    const activeIndex = Math.max(0, sourceSheets.findIndex((sheet) => sheet.id === activeSheetId));
+    const nextActiveSheet = nextSheets[activeIndex] ?? nextSheets[0];
+    const created = makeConfiguration(`${configName.trim() || "Configuration"} Copy`, nextActiveSheet.cells, nextActiveSheet.columnCount, nextActiveSheet.rowCount, {
+      sheets: nextSheets,
+      activeSheetId: nextActiveSheet.id,
+    });
     setConfigurations((current) => [...current, created]);
     loadConfiguration(created);
   }
@@ -748,17 +788,57 @@ export function VariableSheet() {
   }
 
   function loadConfiguration(configuration: LocalConfiguration) {
+    const nextSheets = configuration.sheets ?? [sheetFromConfiguration(configuration)];
+    const nextActiveSheet = nextSheets.find((sheet) => sheet.id === configuration.activeSheetId) ?? nextSheets[0];
     setActiveConfigId(configuration.id);
     setConfigName(configuration.name);
-    setCells(configuration.cells);
-    setColumnCount(configuration.columnCount ?? defaultColumnCount);
-    setRowCount(configuration.rowCount ?? defaultRowCount);
+    setSheets(nextSheets);
+    setActiveSheetId(nextActiveSheet.id);
+    setCells(nextActiveSheet.cells);
+    setColumnCount(nextActiveSheet.columnCount);
+    setRowCount(nextActiveSheet.rowCount);
     setUndoStack([]);
     setRedoStack([]);
     setSelectedAddress("A1");
     setEditingAddress(null);
     setDraftEntry("");
     setIsDirty(false);
+  }
+
+  function switchSheet(nextSheetId: string) {
+    if (nextSheetId === activeSheetId) return;
+    const nextSheets = currentWorkbookSheets();
+    const nextSheet = nextSheets.find((sheet) => sheet.id === nextSheetId);
+    if (!nextSheet) return;
+
+    setSheets(nextSheets);
+    setActiveSheetId(nextSheet.id);
+    setCells(nextSheet.cells);
+    setColumnCount(nextSheet.columnCount);
+    setRowCount(nextSheet.rowCount);
+    setUndoStack([]);
+    setRedoStack([]);
+    setSelectedAddress("A1");
+    setEditingAddress(null);
+    setDraftEntry("");
+    setCopiedAddress(null);
+    setIsDirty(true);
+  }
+
+  function addSheet() {
+    const nextSheets = currentWorkbookSheets();
+    const created = makeWorkbookSheet(`Sheet ${nextSheets.length + 1}`, {}, defaultColumnCount, defaultRowCount);
+    setSheets([...nextSheets, created]);
+    setActiveSheetId(created.id);
+    setCells(created.cells);
+    setColumnCount(created.columnCount);
+    setRowCount(created.rowCount);
+    setUndoStack([]);
+    setRedoStack([]);
+    setSelectedAddress("A1");
+    setEditingAddress(null);
+    setDraftEntry("");
+    setIsDirty(true);
   }
 
   function confirmDiscardUnsaved() {
@@ -825,11 +905,38 @@ export function VariableSheet() {
       return;
     }
 
-    const converted = convertImportedSheetToQuoin(selectedSheet, { names: pendingImport.names });
-    const reviewItems = [...pendingImport.reviewItems, ...converted.reviewItems];
-    const importedFormulaCount = selectedSheet.cells.filter((cell) => cell.kind === "formula").length;
-    const configurationName = makeImportedConfigurationName(pendingImport.fileName, selectedSheet.name);
-    const created = makeConfiguration(configurationName, converted.cells, converted.columnCount, converted.rowCount);
+    const convertedSheets = pendingImport.sheets.map((sheet) => {
+      const converted = convertImportedSheetToQuoin(sheet, { names: pendingImport.names });
+      return {
+        source: sheet,
+        converted,
+        workbookSheet: makeWorkbookSheet(sheet.name, converted.cells, converted.columnCount, converted.rowCount),
+      };
+    });
+    const selectedIndex = Math.max(0, pendingImport.sheets.findIndex((sheet) => sheet.id === selectedSheet.id));
+    const activeImportedSheet = convertedSheets[selectedIndex] ?? convertedSheets[0];
+    const workbookSheets = convertedSheets.map((sheet) => sheet.workbookSheet);
+    const reviewItems = [
+      ...pendingImport.reviewItems,
+      ...convertedSheets.flatMap((sheet) => sheet.converted.reviewItems),
+    ];
+    const importedFormulaCount = pendingImport.sheets.reduce(
+      (count, sheet) => count + sheet.cells.filter((cell) => cell.kind === "formula").length,
+      0,
+    );
+    const importedCellCount = convertedSheets.reduce((count, sheet) => count + Object.keys(sheet.converted.cells).length, 0);
+    const promotedNameCount = convertedSheets.reduce((count, sheet) => count + sheet.converted.promotedNameCount, 0);
+    const configurationName = makeImportedConfigurationName(pendingImport.fileName);
+    const created = makeConfiguration(
+      configurationName,
+      activeImportedSheet.workbookSheet.cells,
+      activeImportedSheet.workbookSheet.columnCount,
+      activeImportedSheet.workbookSheet.rowCount,
+      {
+        sheets: workbookSheets,
+        activeSheetId: activeImportedSheet.workbookSheet.id,
+      },
+    );
 
     setConfigurations((current) => [...current, created]);
     loadConfiguration(created);
@@ -838,13 +945,14 @@ export function VariableSheet() {
     setLastImportReport({
       fileName: pendingImport.fileName,
       sheetName: selectedSheet.name,
-      cellCount: Object.keys(converted.cells).length,
+      sheetCount: pendingImport.sheets.length,
+      cellCount: importedCellCount,
       formulaCount: importedFormulaCount,
-      promotedNameCount: converted.promotedNameCount,
+      promotedNameCount,
       reviewItems,
     });
     setImportMessage(
-      `Imported ${selectedSheet.name}: ${Object.keys(converted.cells).length} cells, ${importedFormulaCount} formulas, ${converted.promotedNameCount} named cells, ${reviewItems.length} review items.`,
+      `Imported ${pendingImport.sheets.length} sheet${pendingImport.sheets.length === 1 ? "" : "s"} from ${pendingImport.fileName}: ${importedCellCount} cells, ${importedFormulaCount} formulas, ${promotedNameCount} named cells, ${reviewItems.length} review items.`,
     );
     setActiveView("sheet");
   }
@@ -867,6 +975,13 @@ export function VariableSheet() {
     const cell = getCell(cells, rule.address);
     return cell.role === "validation" && cell.surfaced;
   });
+  const visibleSheets = sheets.length > 0
+    ? sheets.map((sheet) => (
+      sheet.id === activeSheetId
+        ? { ...sheet, cells, columnCount, rowCount }
+        : sheet
+    ))
+    : [];
 
   return (
     <>
@@ -947,7 +1062,7 @@ export function VariableSheet() {
           {pendingImport && selectedImportSheet && (
             <div className="importControls">
               <label>
-                Worksheet
+                Open Sheet
                 <select value={selectedImportSheetId} onChange={(event) => setSelectedImportSheetId(event.target.value)}>
                   {pendingImport.sheets.map((sheet) => (
                     <option key={sheet.id} value={sheet.id}>
@@ -965,7 +1080,7 @@ export function VariableSheet() {
               </div>
 
               <button type="button" onClick={confirmImportSheet}>
-                Import as New Configuration
+                Import Workbook
               </button>
             </div>
           )}
@@ -973,6 +1088,7 @@ export function VariableSheet() {
           {lastImportReport && !pendingImport && (
             <div className="importReport">
               <div className="importStats">
+                <span>{lastImportReport.sheetCount} sheets</span>
                 <span>{lastImportReport.cellCount} cells</span>
                 <span>{lastImportReport.formulaCount} formulas</span>
                 <span>{lastImportReport.promotedNameCount} named cells</span>
@@ -1016,7 +1132,7 @@ export function VariableSheet() {
       {activeView === "sheet" ? (
         <>
           <div className="formulaBar">
-            <span>{selectedAddress}</span>
+            <span>{activeSheet ? `${activeSheet.name}!${selectedAddress}` : selectedAddress}</span>
             <input
               aria-label="Formula bar"
               value={editingAddress === selectedAddress ? draftEntry : selectedCell.entry}
@@ -1095,6 +1211,13 @@ export function VariableSheet() {
               </div>
             </section>
 
+            <SheetStrip
+              activeSheetId={activeSheetId}
+              addSheet={addSheet}
+              sheets={visibleSheets}
+              switchSheet={switchSheet}
+            />
+
             <Inspector
               clearCell={clearCell}
               dependencySummary={dependencySummary}
@@ -1131,6 +1254,43 @@ export function VariableSheet() {
         </div>
       </section>
     </>
+  );
+}
+
+function SheetStrip({
+  activeSheetId,
+  addSheet,
+  sheets,
+  switchSheet,
+}: {
+  activeSheetId: string;
+  addSheet: () => void;
+  sheets: WorkbookSheet[];
+  switchSheet: (sheetId: string) => void;
+}) {
+  return (
+    <aside className="sheetStrip" aria-label="Sheets">
+      <div className="sheetStripHeader">Sheets</div>
+      <div className="sheetStripList" role="tablist" aria-label="Workbook sheets">
+        {sheets.map((sheet) => (
+          <button
+            key={sheet.id}
+            type="button"
+            data-active={sheet.id === activeSheetId}
+            onClick={() => switchSheet(sheet.id)}
+            role="tab"
+            aria-selected={sheet.id === activeSheetId}
+            title={sheet.name}
+          >
+            <span>{sheet.name}</span>
+            <small>{Object.keys(sheet.cells).length} cells</small>
+          </button>
+        ))}
+      </div>
+      <button type="button" className="sheetAddButton" onClick={addSheet}>
+        Add Sheet
+      </button>
+    </aside>
   );
 }
 
@@ -2050,14 +2210,24 @@ function hydrateConfigurations(configurations: LocalConfiguration[]): LocalConfi
 
   return configurations
     .filter((configuration) => configuration && typeof configuration === "object")
-    .map((configuration) => ({
-      id: configuration.id || makeConfigId(),
-      name: configuration.name || "Untitled Configuration",
-      cells: hydrateCells(configuration.cells ?? {}),
-      columnCount: configuration.columnCount ?? defaultColumnCount,
-      rowCount: configuration.rowCount ?? defaultRowCount,
-      updatedAt: configuration.updatedAt || new Date().toISOString(),
-    }));
+    .map((configuration) => {
+      const legacySheet = sheetFromConfiguration(configuration);
+      const sheets = Array.isArray(configuration.sheets) && configuration.sheets.length > 0
+        ? configuration.sheets.map(hydrateWorkbookSheet)
+        : [legacySheet];
+      const activeSheet = sheets.find((sheet) => sheet.id === configuration.activeSheetId) ?? sheets[0];
+
+      return {
+        id: configuration.id || makeConfigId(),
+        name: configuration.name || "Untitled Configuration",
+        activeSheetId: activeSheet.id,
+        sheets,
+        cells: activeSheet.cells,
+        columnCount: activeSheet.columnCount,
+        rowCount: activeSheet.rowCount,
+        updatedAt: configuration.updatedAt || new Date().toISOString(),
+      };
+    });
 }
 
 function migrateLegacyCells(): Record<string, GridCell> | null {
@@ -2074,20 +2244,29 @@ function migrateLegacyCells(): Record<string, GridCell> | null {
   }
 }
 
-function makeConfiguration(name: string, cells: Record<string, GridCell>, columnCount = defaultColumnCount, rowCount = defaultRowCount): LocalConfiguration {
+function makeConfiguration(
+  name: string,
+  cells: Record<string, GridCell>,
+  columnCount = defaultColumnCount,
+  rowCount = defaultRowCount,
+  workbook?: { sheets: WorkbookSheet[]; activeSheetId: string },
+): LocalConfiguration {
+  const activeSheet = workbook?.sheets.find((sheet) => sheet.id === workbook.activeSheetId) ?? workbook?.sheets[0];
   return {
     id: makeConfigId(),
     name,
-    cells: hydrateCells(cells),
-    columnCount,
-    rowCount,
+    activeSheetId: activeSheet?.id,
+    sheets: workbook?.sheets.map(hydrateWorkbookSheet),
+    cells: hydrateCells(activeSheet?.cells ?? cells),
+    columnCount: activeSheet?.columnCount ?? columnCount,
+    rowCount: activeSheet?.rowCount ?? rowCount,
     updatedAt: new Date().toISOString(),
   };
 }
 
-function makeImportedConfigurationName(fileName: string, sheetName: string): string {
+function makeImportedConfigurationName(fileName: string): string {
   const baseName = fileName.replace(/\.[^.]+$/, "").trim() || "Workbook";
-  return `Imported - ${baseName} - ${sheetName}`;
+  return `Imported - ${baseName}`;
 }
 
 function importReviewItemsForSheet(names: ImportedName[], sheetName: string): ImportReviewItem[] {
@@ -2104,6 +2283,45 @@ function importReviewItemsForSheet(names: ImportedName[], sheetName: string): Im
 
 function makeConfigId(): string {
   return `config_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeSheetId(): string {
+  return `sheet_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeWorkbookSheet(
+  name: string,
+  cells: Record<string, GridCell>,
+  columnCount = defaultColumnCount,
+  rowCount = defaultRowCount,
+): WorkbookSheet {
+  return {
+    id: makeSheetId(),
+    name: name.trim() || "Sheet",
+    cells: hydrateCells(cells),
+    columnCount,
+    rowCount,
+  };
+}
+
+function hydrateWorkbookSheet(sheet: WorkbookSheet): WorkbookSheet {
+  return {
+    id: sheet.id || makeSheetId(),
+    name: sheet.name || "Sheet",
+    cells: hydrateCells(sheet.cells ?? {}),
+    columnCount: sheet.columnCount ?? defaultColumnCount,
+    rowCount: sheet.rowCount ?? defaultRowCount,
+  };
+}
+
+function sheetFromConfiguration(configuration: LocalConfiguration): WorkbookSheet {
+  return {
+    id: configuration.activeSheetId || makeSheetId(),
+    name: "Sheet 1",
+    cells: hydrateCells(configuration.cells ?? {}),
+    columnCount: configuration.columnCount ?? defaultColumnCount,
+    rowCount: configuration.rowCount ?? defaultRowCount,
+  };
 }
 
 function getCell(cells: Record<string, GridCell>, address: string): GridCell {

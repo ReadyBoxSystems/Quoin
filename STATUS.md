@@ -34,7 +34,7 @@ The prototype has the right core shape:
 - dropdown runner inputs
 - Runner Preview generated from surfaced Smart Cells with generic input/output/action/review/validation grouping
 - local browser persistence with named configurations
-- `.xlsx` import into new local configurations
+- `.xlsx` import into new local configurations with preserved Sheets
 - importer review items for named ranges, unsafe names, and likely formula compatibility issues
 - Help tab
 - generic fake-data `Demo - Beam Selection` workflow
@@ -59,7 +59,7 @@ The prototype has the right core shape:
 - Validation cells display `PASS` or `FAIL`.
 - Runner Preview shows surfaced inputs, outputs, shop actions, review flags, validation, and rule messages.
 - Local configurations can be created, renamed, saved, loaded, duplicated, and deleted.
-- Excel workbooks can be imported from `.xlsx` files one worksheet at a time.
+- Excel workbooks can be imported as multi-Sheet local configurations.
 - Imported values and formulas are preserved in the Quoin grid.
 - Imported formulas remain visible when unsupported or risky features need review.
 - Safe workbook-defined names pointing to single cells can promote imported cells to Smart Cells.
@@ -74,8 +74,8 @@ The prototype has the right core shape:
 - Local configurations are browser-local only.
 - Lookup editor supports Excel paste but is still not a full large-table management surface.
 - Excel import is a first local prototype, not full Excel compatibility.
-- Import supports one worksheet at a time and does not yet preserve full workbook structure as Quoin tabs/reference tables.
-- Imported cross-sheet formulas are preserved but not fully supported by the engine.
+- Import now preserves workbook sheets as Quoin Sheets, but the engine still calculates the active Sheet only.
+- Imported cross-sheet formulas are preserved and flagged for review, but not fully supported by the engine.
 - Rule messages are separate from annotations, but there is no rule library yet.
 - No publish snapshot yet.
 - No immutable execution records yet.
@@ -99,6 +99,7 @@ The prototype has the right core shape:
 - Quoin should improve the workflow direction, not visually clone an existing workbook.
 - Excel import should mean "import the calculator, then structure it"; Quoin should preserve the calculation surface first and keep Smart Cell mapping as a deliberate follow-up step.
 - Unsupported Excel features should produce review items rather than silently dropping formulas or workbook names.
+- The visible UI label for workbook tabs is "Sheet"; "Workbook Structure" describes the underlying model.
 
 ## Verification
 
@@ -118,7 +119,7 @@ Manual testing still needed:
 
 - Treat root `import-test-*.xlsx` browser results in `Quoin test notes.md` as the latest manual import pass.
 - Use the manual results to design workbook structure for multi-sheet imports and reference-table-like data.
-- Re-run the fixture sequence after workbook-structure changes.
+- Re-run the fixture sequence after cross-sheet calculation or reference-table behavior changes.
 
 ## Open UX Notes
 

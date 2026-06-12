@@ -275,7 +275,7 @@ h1 {
   background: var(--sheet);
   border: 1px solid var(--line-strong);
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: 140px minmax(0, 1fr);
   margin-bottom: 10px;
   min-height: 36px;
   position: relative;
@@ -306,6 +306,10 @@ h1 {
   font-size: 13px;
   font-weight: 700;
   justify-content: center;
+  overflow: hidden;
+  padding: 0 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .formulaBar input {
@@ -327,7 +331,76 @@ h1 {
   align-items: start;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 108px 340px;
+}
+
+.sheetStrip {
+  background: var(--sheet);
+  border: 1px solid var(--line-strong);
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  position: sticky;
+  top: 12px;
+}
+
+.sheetStripHeader {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.sheetStripList {
+  display: grid;
+  gap: 6px;
+}
+
+.sheetStrip button {
+  border-radius: 4px;
+  justify-content: start;
+  min-height: 34px;
+  padding: 6px 7px;
+  text-align: left;
+  width: 100%;
+}
+
+.sheetStripList button {
+  align-items: start;
+  display: grid;
+  gap: 2px;
+}
+
+.sheetStripList button[data-active="true"] {
+  background: #eef5ff;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sheetStripList span,
+.sheetStripList small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheetStripList span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sheetStripList small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sheetAddButton {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .spreadsheetGrid {
@@ -1136,6 +1209,10 @@ h1 {
 
   .lookupCriterion {
     grid-template-columns: 1fr;
+  }
+
+  .sheetStrip {
+    position: static;
   }
 
   .inspector {

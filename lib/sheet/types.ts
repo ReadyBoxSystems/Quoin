@@ -22,9 +22,19 @@ export interface GridCell {
   lookup?: LookupConfig;
 }
 
+export interface WorkbookSheet {
+  id: string;
+  name: string;
+  cells: Record<string, GridCell>;
+  columnCount: number;
+  rowCount: number;
+}
+
 export interface LocalConfiguration {
   id: string;
   name: string;
+  activeSheetId?: string;
+  sheets?: WorkbookSheet[];
   cells: Record<string, GridCell>;
   columnCount?: number;
   rowCount?: number;

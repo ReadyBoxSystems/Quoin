@@ -13,7 +13,8 @@ The product direction is:
 - Smart Cells can have role, type, display label, annotation, runner surfacing, lookup behavior, action output behavior, and rule behavior.
 - Runner Preview is generated from surfaced Smart Cells.
 - Local named configurations are browser-local for now.
-- Excel import is now an early local prototype path: import an `.xlsx` calculator, choose one worksheet, preserve values/formulas, create a new local configuration, and then structure it with Quoin Smart Cells.
+- Excel import is now an early local prototype path: import an `.xlsx` calculator, preserve workbook sheets, preserve values/formulas, create a new local configuration, and then structure it with Quoin Smart Cells.
+- The user-facing feature name for workbook tabs is "Sheet." Use "Workbook Structure" for the underlying model, not the primary UI label.
 - Lookup table direction: keep the current embedded Smart Cell lookup tables as a prototype shortcut, but the intended product model is first-class reference tables / CSV-ingested datasets that lookup Smart Cells can query. This should feel closer to Excel tabs or named table ranges than hidden per-cell data.
 - AI ingestion, database persistence, auth, departments, publishing, and audit reports are later phases.
 
@@ -82,6 +83,7 @@ This is currently a local prototype with:
 - browser-local named configurations
 - ExcelJS-based `.xlsx` workbook reader isolated behind `lib/import/read.ts`
 - neutral import model and Quoin sheet converter in `lib/import/`
+- local configurations can now hold multiple Sheets, with one active Sheet shown in the grid
 - no database yet
 - no auth yet
 
@@ -89,6 +91,7 @@ Important files:
 
 - `app/page.tsx` - renders the prototype shell
 - `components/variable-sheet.tsx` - main sheet, inspector, runner preview
+- `lib/sheet/types.ts` - local sheet/workbook configuration types
 - `lib/engine/index.ts` - calculation engine
 - `lib/engine/types.ts` - engine types
 - `lib/engine/engine.test.ts` - engine tests

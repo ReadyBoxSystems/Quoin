@@ -17,7 +17,7 @@ The intended workflow:
 Imported Excel calculators should follow the same mental model:
 
 1. Import the workbook calculation surface.
-2. Choose the worksheet to turn into a Quoin grid.
+2. Preserve workbook Sheets and choose the Sheet to open first.
 3. Review imported values, formulas, names, and warning items.
 4. Promote/adjust Smart Cells in Quoin.
 5. Surface the runner-facing cells.
@@ -62,7 +62,8 @@ Display labels are for runner-facing text, for example `Design Span (ft)` or `Re
 
 Current Excel-familiar behavior:
 
-- `.xlsx` import for one worksheet at a time, creating a new local configuration
+- `.xlsx` import creates one local configuration with preserved Sheets
+- Sheet switching uses a reserved strip between the grid and the cell inspector
 - imported cell values and formulas preserved in the grid
 - workbook-defined safe single-cell names can promote cells to Smart Cells
 - imported named ranges and formula compatibility issues appear as review items
@@ -85,8 +86,8 @@ Current import behavior:
 - user clicks `Import Excel`
 - user selects an `.xlsx` file
 - Quoin reads workbook sheets and names
-- user chooses one worksheet
-- Quoin imports values and formulas into a new local configuration
+- user chooses which Sheet to open first
+- Quoin imports workbook Sheets into a new local configuration
 - formulas remain visible even if the engine cannot calculate them
 - safe workbook-defined names pointing to a single cell can become Smart Cell names
 - named ranges, unsafe names, cross-sheet references, external workbook references, structured table references, spill markers, and semicolon separators are reported as review items
@@ -207,10 +208,11 @@ Rules:
 - Main component: `components/variable-sheet.tsx`
 - Engine: `lib/engine/index.ts`
 - Engine tests: `lib/engine/engine.test.ts`
+- Workbook/Sheet types: `lib/sheet/types.ts`
 - Git remote: `https://github.com/ReadyBoxSystems/Quoin.git`
 - Primary branch: `main`
 - Baseline commit: `5259f17 Initial Quoin prototype baseline`
 - Local configuration storage keys currently live in the component.
-- Local configurations include sheet dimensions for row/column changes.
-- Excel import creates a new local configuration by default instead of overwriting the current one.
+- Local configurations include one or more Sheets, an active Sheet id, and legacy top-level cell/dimension fields for compatibility.
+- Excel import creates a new multi-Sheet local configuration by default instead of overwriting the current one.
 - Changing the storage shape may require a new local storage key, `Load Demo`, `Clear Sheet`, or creating a new local configuration.
