@@ -6,3 +6,12 @@ dist
 .env.local
 *.tsbuildinfo
 npm-debug.log*
+
+# Internal project notes
+AGENTS.md
+DEV_NOTES.md
+STATUS.md
+ROADMAP.md
+IMPORT_PLAN.md
+IMPORT_TEST_FILES.md
+KNOWN_ISSUES.md
