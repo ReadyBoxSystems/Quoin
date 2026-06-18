@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { executeEngine, type CellValue, type EngineCell, type SmartCellRole, type SmartCellType } from "@/lib/engine";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import {
+  executeEngine,
+  executeWorkbookEngine,
+  type CellValue,
+  type EngineCell,
+  type SmartCellRole,
+  type SmartCellType,
+  type WorkbookEngineResult,
+} from "@/lib/engine";
 import { convertImportedSheetToQuoin } from "@/lib/import/convert";
 import type { ImportedName, ImportedWorkbook, ImportReviewItem } from "@/lib/import/types";
 import type { GridCell, LocalConfiguration, LookupConfig, SheetSnapshot, WorkbookSheet } from "@/lib/sheet/types";
@@ -34,6 +42,16 @@ interface ImportReport {
   formulaCount: number;
   promotedNameCount: number;
   reviewItems: ImportReviewItem[];
+}
+
+interface RunnerSheetContext {
+  sheetId: string;
+  sheetName: string;
+  cells: Record<string, GridCell>;
+  displayValues: Record<string, CellValue>;
+  surfacedCells: GridCell[];
+  result: ReturnType<typeof executeEngine>;
+  validationStates: Array<{ address: string; state: string; name?: string | null }>;
 }
 
 const beamLookup: LookupConfig = {
@@ -377,6 +395,26 @@ export function VariableSheet() {
       const existing = getCell(current, address);
       return { ...current, [address]: applyCellPatch(existing, patch) };
     });
+  }
+
+  function updateWorkbookCell(sheetId: string, address: string, patch: Partial<GridCell>) {
+    if (sheetId === activeSheetId) {
+      updateCell(address, patch);
+      return;
+    }
+
+    setSheets((current) => current.map((sheet) => {
+      if (sheet.id !== sheetId) return sheet;
+      const existing = getCell(sheet.cells, address);
+      return {
+        ...sheet,
+        cells: {
+          ...sheet.cells,
+          [address]: applyCellPatch(existing, patch),
+        },
+      };
+    }));
+    setIsDirty(true);
   }
 
   function clearCell(address: string) {
@@ -962,25 +1000,30 @@ export function VariableSheet() {
     setImportError("");
   }
 
-  const selectedIssues = issueMap.get(selectedAddress) ?? [];
-  const surfacedCells = useMemo(
-    () => Object.values(cells).filter((cell) => cell.name && cell.surfaced),
-    [cells],
-  );
-  const selectedImportSheet = pendingImport?.sheets.find((sheet) => sheet.id === selectedImportSheetId) ?? pendingImport?.sheets[0] ?? null;
-  const importReviewItems = pendingImport && selectedImportSheet
-    ? pendingImport.reviewItems.concat(importReviewItemsForSheet(pendingImport.names, selectedImportSheet.name))
-    : [];
-  const validationStates = result.ruleStates.filter((rule) => {
-    const cell = getCell(cells, rule.address);
-    return cell.role === "validation" && cell.surfaced;
-  });
   const visibleSheets = sheets.length > 0
     ? sheets.map((sheet) => (
       sheet.id === activeSheetId
         ? { ...sheet, cells, columnCount, rowCount }
         : sheet
     ))
+    : [];
+  const workbookEngineSheets = useMemo(
+    () => visibleSheets.map((sheet) => ({
+      id: sheet.id,
+      name: sheet.name,
+      cells: toEngineCells(sheet.cells),
+    })),
+    [visibleSheets],
+  );
+  const workbookResult = useMemo(() => executeWorkbookEngine({ sheets: workbookEngineSheets }), [workbookEngineSheets]);
+  const runnerSheets = useMemo(
+    () => buildRunnerSheetContexts(visibleSheets, workbookResult),
+    [visibleSheets, workbookResult],
+  );
+  const selectedIssues = issueMap.get(selectedAddress) ?? [];
+  const selectedImportSheet = pendingImport?.sheets.find((sheet) => sheet.id === selectedImportSheetId) ?? pendingImport?.sheets[0] ?? null;
+  const importReviewItems = pendingImport && selectedImportSheet
+    ? pendingImport.reviewItems.concat(importReviewItemsForSheet(pendingImport.names, selectedImportSheet.name))
     : [];
 
   return (
@@ -1232,12 +1275,9 @@ export function VariableSheet() {
         </>
       ) : activeView === "runner" ? (
         <RunnerPreview
-          cells={cells}
-          displayValues={displayValues}
-          result={result}
-          surfacedCells={surfacedCells}
-          updateCell={updateCell}
-          validationStates={validationStates}
+          result={workbookResult}
+          runnerSheets={runnerSheets}
+          updateCell={updateWorkbookCell}
         />
       ) : (
         <HelpPanel />
@@ -1246,11 +1286,11 @@ export function VariableSheet() {
       <section className="runnerStrip">
         <div>
           <span>Surfaced Outputs</span>
-          <strong>{formatOutputs(result.outputs)}</strong>
+          <strong>{formatOutputs(workbookResult.outputs)}</strong>
         </div>
         <div>
           <span>Compliance</span>
-          <strong>{result.warnings.length ? result.warnings.map((warning) => warning.message).join(" ") : "No warnings"}</strong>
+          <strong>{workbookResult.warnings.length ? formatWorkbookWarnings(workbookResult.warnings, runnerSheets) : "No warnings"}</strong>
         </div>
       </section>
     </>
@@ -1521,25 +1561,35 @@ function Inspector({
 }
 
 function RunnerPreview({
-  cells,
-  displayValues,
   result,
-  surfacedCells,
   updateCell,
-  validationStates,
+  runnerSheets,
 }: {
-  cells: Record<string, GridCell>;
-  displayValues: Record<string, CellValue>;
-  result: ReturnType<typeof executeEngine>;
-  surfacedCells: GridCell[];
-  updateCell: (address: string, patch: Partial<GridCell>) => void;
-  validationStates: Array<{ address: string; state: string; name?: string | null }>;
+  result: WorkbookEngineResult;
+  runnerSheets: RunnerSheetContext[];
+  updateCell: (sheetId: string, address: string, patch: Partial<GridCell>) => void;
 }) {
-  const inputs = surfacedCells.filter((cell) => cell.role === "input");
-  const outputs = surfacedCells.filter((cell) => cell.role !== "input" && cell.role !== "validation" && cell.role !== "compliance" && cell.role !== "action");
-  const actions = surfacedCells.filter((cell) => cell.role === "action");
-  const surfacedAddresses = new Set(surfacedCells.map((cell) => cell.address));
-  const warnings = result.warnings.filter((warning) => surfacedAddresses.has(warning.address));
+  const showSheetGroups = runnerSheets.filter((sheet) => sheet.surfacedCells.length > 0).length > 1;
+  const inputGroups = runnerSheets.map((sheet) => ({
+    ...sheet,
+    items: sheet.surfacedCells.filter((cell) => cell.role === "input"),
+  })).filter((sheet) => sheet.items.length > 0);
+  const outputGroups = runnerSheets.map((sheet) => ({
+    ...sheet,
+    items: sheet.surfacedCells.filter((cell) => cell.role !== "input" && cell.role !== "validation" && cell.role !== "compliance" && cell.role !== "action"),
+  })).filter((sheet) => sheet.items.length > 0);
+  const actionGroups = runnerSheets.map((sheet) => ({
+    ...sheet,
+    items: sheet.surfacedCells.filter((cell) => cell.role === "action"),
+  })).filter((sheet) => sheet.items.length > 0);
+  const warningGroups = runnerSheets.map((sheet) => ({
+    ...sheet,
+    items: sheet.result.warnings.filter((warning) => sheet.surfacedCells.some((cell) => cell.address === warning.address)),
+  })).filter((sheet) => sheet.items.length > 0);
+  const validationGroups = runnerSheets.map((sheet) => ({
+    ...sheet,
+    items: sheet.validationStates,
+  })).filter((sheet) => sheet.items.length > 0);
 
   return (
     <section className="runnerPreview">
@@ -1554,38 +1604,46 @@ function RunnerPreview({
       <div className="runnerGrid">
         <div className="runnerPanel">
           <h3>Inputs</h3>
-          {inputs.length === 0 ? (
+          {inputGroups.length === 0 ? (
             <p className="runnerEmpty">No surfaced inputs.</p>
           ) : (
-            inputs.map((cell) => (
-              <label key={cell.address}>
-                {labelForCell(cell)}
-                {cell.inputOptions.length > 0 ? (
-                  <select value={cell.entry} onChange={(event) => updateCell(cell.address, { entry: event.target.value })}>
-                    {cell.inputOptions.map((option) => (
-                      <option key={option} value={option}>{prettifyName(option)}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input value={cell.entry} onChange={(event) => updateCell(cell.address, { entry: event.target.value })} />
-                )}
-                {cell.annotation && <small>{cell.annotation}</small>}
-              </label>
+            inputGroups.map((group) => (
+              <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
+                {group.items.map((cell) => (
+                  <label key={`${group.sheetId}-${cell.address}`}>
+                    {labelForCell(cell)}
+                    {cell.inputOptions.length > 0 ? (
+                      <select value={cell.entry} onChange={(event) => updateCell(group.sheetId, cell.address, { entry: event.target.value })}>
+                        {cell.inputOptions.map((option) => (
+                          <option key={option} value={option}>{prettifyName(option)}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input value={cell.entry} onChange={(event) => updateCell(group.sheetId, cell.address, { entry: event.target.value })} />
+                    )}
+                    {cell.annotation && <small>{cell.annotation}</small>}
+                  </label>
+                ))}
+              </RunnerSheetGroup>
             ))
           )}
         </div>
 
         <div className="runnerPanel">
           <h3>Outputs</h3>
-          {outputs.length === 0 ? (
+          {outputGroups.length === 0 ? (
             <p className="runnerEmpty">No surfaced outputs.</p>
           ) : (
-            outputs.map((cell) => (
-              <div className="runnerResult" key={cell.address}>
-                <span>{labelForCell(cell)}</span>
-                <strong>{formatCellValue(displayValues[cell.address] ?? null)}</strong>
-                {cell.annotation && <small>{cell.annotation}</small>}
-              </div>
+            outputGroups.map((group) => (
+              <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
+                {group.items.map((cell) => (
+                  <div className="runnerResult" key={`${group.sheetId}-${cell.address}`}>
+                    <span>{labelForCell(cell)}</span>
+                    <strong>{formatCellValue(group.displayValues[cell.address] ?? null)}</strong>
+                    {cell.annotation && <small>{cell.annotation}</small>}
+                  </div>
+                ))}
+              </RunnerSheetGroup>
             ))
           )}
         </div>
@@ -1594,27 +1652,35 @@ function RunnerPreview({
       <div className="runnerMessages">
         <div>
           <h3>Shop Actions</h3>
-          {actions.length === 0 ? (
+          {actionGroups.length === 0 ? (
             <p className="runnerEmpty">No shop actions.</p>
           ) : (
-            actions.map((cell) => (
-              <p data-state="action" key={cell.address}>
-                <strong>ACTION</strong>
-                {formatCellValue(displayValues[cell.address] ?? null) || labelForCell(cell)}
-              </p>
+            actionGroups.map((group) => (
+              <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
+                {group.items.map((cell) => (
+                  <p data-state="action" key={`${group.sheetId}-${cell.address}`}>
+                    <strong>ACTION</strong>
+                    {formatCellValue(group.displayValues[cell.address] ?? null) || labelForCell(cell)}
+                  </p>
+                ))}
+              </RunnerSheetGroup>
             ))
           )}
         </div>
         <div>
           <h3>Review Flags</h3>
-          {warnings.length === 0 ? (
+          {warningGroups.length === 0 ? (
             <p className="runnerEmpty">No review flags.</p>
           ) : (
-            warnings.map((warning) => (
-              <p data-state="warn" key={warning.cellId}>
-                <strong>WARN</strong>
-                {warning.message}
-              </p>
+            warningGroups.map((group) => (
+              <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
+                {group.items.map((warning) => (
+                  <p data-state="warn" key={warning.cellId}>
+                    <strong>WARN</strong>
+                    {warning.message}
+                  </p>
+                ))}
+              </RunnerSheetGroup>
             ))
           )}
         </div>
@@ -1623,22 +1689,43 @@ function RunnerPreview({
       <div className="runnerMessages">
         <div>
           <h3>Validation</h3>
-          {validationStates.length === 0 ? (
+          {validationGroups.length === 0 ? (
             <p className="runnerEmpty">No validation rules.</p>
           ) : (
-            validationStates.map((rule) => {
-              const cell = getCell(cells, rule.address);
-              return (
-                <p data-state={rule.state} key={rule.address}>
-                  <strong>{formatCellValue(displayValues[rule.address] ?? null)}</strong>
-                  {cell.ruleMessage || cell.annotation || labelForCell(cell)}
-                </p>
-              );
-            })
+            validationGroups.map((group) => (
+              <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
+                {group.items.map((rule) => {
+                  const cell = getCell(group.cells, rule.address);
+                  return (
+                    <p data-state={rule.state} key={`${group.sheetId}-${rule.address}`}>
+                      <strong>{formatCellValue(group.displayValues[rule.address] ?? null)}</strong>
+                      {cell.ruleMessage || cell.annotation || labelForCell(cell)}
+                    </p>
+                  );
+                })}
+              </RunnerSheetGroup>
+            ))
           )}
         </div>
       </div>
     </section>
+  );
+}
+
+function RunnerSheetGroup({
+  children,
+  sheetName,
+  showHeading,
+}: {
+  children: ReactNode;
+  sheetName: string;
+  showHeading: boolean;
+}) {
+  return (
+    <div className="runnerSheetGroup">
+      {showHeading && <h4>{sheetName}</h4>}
+      {children}
+    </div>
   );
 }
 
@@ -2383,6 +2470,46 @@ function toEngineCells(cells: Record<string, GridCell>): EngineCell[] {
 
       return engineCell;
     });
+}
+
+function buildRunnerSheetContexts(sheets: WorkbookSheet[], workbookResult: WorkbookEngineResult): RunnerSheetContext[] {
+  return sheets.map((sheet) => {
+    const sheetResult = workbookResult.sheetResults.find((item) => item.sheetId === sheet.id);
+    const resultForSheet = sheetResult?.result ?? executeEngine({ cells: toEngineCells(sheet.cells) });
+    const ruleStateMap = new Map(resultForSheet.ruleStates.map((rule) => [rule.address, rule.state]));
+    const columns = makeColumns(sheet.columnCount);
+    const displayValues = buildDisplayValues(sheet.cells, resultForSheet.values, resultForSheet.errors, ruleStateMap, columns, sheet.rowCount);
+    const surfacedCells = Object.values(sheet.cells).filter((cell) => cell.name && cell.surfaced);
+    const validationStates = resultForSheet.ruleStates.filter((rule) => {
+      const cell = getCell(sheet.cells, rule.address);
+      return cell.role === "validation" && cell.surfaced;
+    });
+
+    return {
+      sheetId: sheet.id,
+      sheetName: sheet.name,
+      cells: sheet.cells,
+      displayValues,
+      surfacedCells,
+      result: resultForSheet,
+      validationStates,
+    };
+  });
+}
+
+function formatWorkbookWarnings(warnings: Array<{ cellId: string; message: string }>, runnerSheets: RunnerSheetContext[]): string {
+  const sheetByCellId = new Map<string, string>();
+
+  for (const sheet of runnerSheets) {
+    for (const cell of Object.values(sheet.cells)) {
+      sheetByCellId.set(`${sheet.sheetId}!${cell.address}`, sheet.sheetName);
+    }
+  }
+
+  return warnings.map((warning) => {
+    const sheetName = sheetByCellId.get(warning.cellId);
+    return sheetName ? `${sheetName}: ${warning.message}` : warning.message;
+  }).join(" ");
 }
 
 function buildDisplayValues(

@@ -28,7 +28,7 @@ Expected:
 - No formulas
 - No review items
 
-Result:
+Result: PASS. NO ERRORS TO REPORT.
 
 
 2. Basic Formulas
@@ -44,7 +44,7 @@ Expected:
 - B5, B6, B7 should calculate
 - No review items expected
 
-Result:
+Result: PASS. NO ERRORS TO REPORT
 
 
 3. Named Cells
@@ -62,7 +62,7 @@ Expected:
 - Unsafe name Design Span Unsafe becomes a review item
 - Formula using names should remain visible
 
-Result:
+Result: PASS. NO ERRORS TO REPORT
 
 
 4. Multi-Sheet Cross-Sheet
@@ -82,7 +82,7 @@ Expected:
 - Cross-sheet formulas produce review warnings
 - Cross-sheet formulas are not expected to calculate across Sheets yet
 
-Result:
+Result: MOSTLY PASS. CONCERNING THIS SECTION: "Cross-sheet formulas are not expected to calculate across Sheets yet". WHILE TRUE, THE RUNNER ITSELF SHOULD SHOULD BOTH. CURRENTLY, THE RUNNER ONLY SHOWS THAT PARTICULAR SHEET'S SMART CELLS VS THE EXPECTED COMBINED CELLS. WHILE THE MATH/CONNECTIONS BETWEEN THE CELLS MIGHT NOT EXIST YET, THEY SHOULD SHOW ON THE RUNNER.
 
 
 5. Reference Table Style
@@ -99,7 +99,7 @@ Expected:
 - beam_table named range shows as a review item
 - This is still the fixture for future reference-table direction
 
-Result:
+Result: PASS. NO ERRORS TO REPORT
 
 
 6. Review Warnings
@@ -119,7 +119,7 @@ Expected:
   - semicolon argument separator
   - spill marker / dynamic array marker
 
-Result:
+Result: PASS. NO ERRORS TO REPORT
 
 
 7. Workbook Sheets
@@ -137,7 +137,7 @@ Expected:
 - beam_reference named range appears as a review item
 - Calculator formulas with Inputs! references stay visible and produce cross-sheet review warnings
 
-Result:
+Result: FAILURE. SAME ISSUE AS TEST FOUR. THE RUNNER DOES NOT AGGREGATE THE SHEETS TO ONE FORM. EACH ONE IS SEPARATE, SO NOTHING ACTUALLY WORKS/CONNECTS ON THE RUNNER SIDE.
 
 
 8. Open Selected Sheet
@@ -159,7 +159,7 @@ Expected:
 - B5 on Calculator calculates from same-Sheet references
 - No review items expected
 
-Result:
+Result: CHOOSING THE CALCULATOR AS THE SHEET TO OPEN PASSES. SAME RUNNER ISSUE AS FOUR AND SEVEN.
 
 
 9. Names Across Sheets
@@ -179,7 +179,7 @@ Expected:
 - Same-Sheet formula on Loads should calculate
 - Cross-sheet formula on Summary should remain visible and produce review warnings
 
-Result:
+Result: I SEE THE REVIEW WARNING. SAME RUNNER ISSUE AS FOUR, SEVEN, AND EIGHT.
 
 
 10. Sheet Names With Spaces
@@ -196,7 +196,7 @@ Expected:
 - total_weight promotes on Calc Sheet
 - Quoted cross-sheet formulas remain visible and produce review warnings
 
-Result:
+Result: PASS. SHEET NAMES WITH SPACES IMPORT FIME.
 
 
 11. Sparse Large Sheet
@@ -214,7 +214,7 @@ Expected:
 - far_input and far_total promote as Smart Cells
 - Formula M30 remains visible and should calculate from same-Sheet references
 
-Result:
+Result: PASS. NO ERRORS TO REPORT
 
 
 12. Workbook Review Mix
@@ -234,8 +234,93 @@ Expected:
   - structured table reference
   - semicolon argument separator
 
-Result:
+Result: PASS OTHER THAN THE RUNNER ISSUE. SAME AS FOUR, SEVEN, EIGHT, AND NINE.
 
 
 Summary / notes:
 
+
+Workbook Runner / Cross-Sheet Calculation Retest
+
+Use this sequence after the workbook-scoped Runner Preview and basic cross-Sheet calculation update.
+
+General checks after each import:
+
+- A new local configuration was created.
+- Existing configurations were not overwritten.
+- The Sheets strip appears between the grid and cell panel.
+- Expected Sheet names appear in the Sheets strip.
+- Switching Sheets changes the visible grid.
+- Formula bar shows imported cross-Sheet formulas when selecting formula cells.
+- Basic cross-Sheet formulas calculate across preserved Sheets.
+- Cross-Sheet formulas should no longer appear as review warnings by themselves.
+- Runner Preview gathers surfaced Smart Cells from all Sheets in the workbook.
+- Runner Preview groups surfaced Smart Cells by Sheet when more than one Sheet contributes surfaced cells.
+- Normal coordinate cells do not appear in Runner Preview.
+- Unsurfaced Smart Cells do not appear in Runner Preview.
+- Editing a Runner input from one Sheet updates that Sheet, even when another Sheet is active.
+
+
+13. Workbook Runner Cross-Sheet
+
+Import:
+
+import-test-13-workbook-runner-cross-sheet.xlsx
+
+Expected:
+
+- Two Sheets: Runner Inputs, Runner Calculator
+- runner_span and runner_plf promote on Runner Inputs
+- runner_total_load and runner_review_note promote on Runner Calculator
+- Runner Calculator formulas remain visible
+- runner_total_load calculates from Runner Inputs values
+- No cross-Sheet review warning expected
+- Manually surface runner_span, runner_plf, runner_total_load, and runner_review_note
+- Runner Preview shows surfaced cells from both Sheets, grouped by Sheet
+- Editing runner_span or runner_plf in Runner Preview updates Runner Inputs
+- runner_total_load updates in Runner Preview after input edits
+
+Result:
+
+
+14. Cross-Sheet Range
+
+Import:
+
+import-test-14-cross-sheet-range.xlsx
+
+Expected:
+
+- Two Sheets: Loads, Summary
+- load_a promotes on Loads
+- range_total and range_average promote on Summary
+- SUM(Loads!B3:B5) calculates on Summary
+- AVERAGE(Loads!B3:B5) calculates on Summary
+- No cross-Sheet range review warning expected
+- Manually surface load_a, range_total, and range_average
+- Runner Preview shows surfaced cells from both Sheets, grouped by Sheet
+
+Result:
+
+
+15. Workbook Review After Cross-Sheet Support
+
+Import:
+
+import-test-15-workbook-review-after-cross-sheet-support.xlsx
+
+Expected:
+
+- Two Sheets: Supported Inputs, Review Items
+- supported_input promotes on Supported Inputs
+- supported_cross_sheet_total promotes on Review Items
+- Supported cross-Sheet formula calculates
+- Review list should not flag cross-Sheet references
+- Review list should still flag:
+  - structured table reference
+  - external workbook reference
+  - semicolon argument separator
+- Manually surface supported_input and supported_cross_sheet_total
+- Runner Preview shows surfaced cells from both Sheets, grouped by Sheet
+
+Result:

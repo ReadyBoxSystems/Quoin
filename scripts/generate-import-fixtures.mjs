@@ -281,6 +281,74 @@ const fixtures = [
       workbook.definedNames.add("'Clean Inputs'!$A$3:$B$4", "clean_input_block");
     },
   },
+  {
+    fileName: "import-test-13-workbook-runner-cross-sheet.xlsx",
+    build(workbook) {
+      const inputs = workbook.addWorksheet("Runner Inputs");
+      inputs.getCell("A1").value = "Workbook-scoped runner inputs";
+      inputs.getCell("A3").value = "Span";
+      inputs.getCell("B3").value = 14;
+      inputs.getCell("A4").value = "PLF";
+      inputs.getCell("B4").value = 650;
+
+      const calc = workbook.addWorksheet("Runner Calculator");
+      calc.getCell("A1").value = "Workbook-scoped runner outputs";
+      calc.getCell("A3").value = "Total load";
+      calc.getCell("B3").value = { formula: "'Runner Inputs'!B3*'Runner Inputs'!B4", result: 9100 };
+      calc.getCell("A4").value = "Review note";
+      calc.getCell("B4").value = { formula: 'IF(\'Runner Inputs\'!B3>12,"Review span","OK")', result: "Review span" };
+
+      workbook.definedNames.add("'Runner Inputs'!$B$3", "runner_span");
+      workbook.definedNames.add("'Runner Inputs'!$B$4", "runner_plf");
+      workbook.definedNames.add("'Runner Calculator'!$B$3", "runner_total_load");
+      workbook.definedNames.add("'Runner Calculator'!$B$4", "runner_review_note");
+    },
+  },
+  {
+    fileName: "import-test-14-cross-sheet-range.xlsx",
+    build(workbook) {
+      const loads = workbook.addWorksheet("Loads");
+      loads.getCell("A1").value = "Cross-sheet range source";
+      loads.getCell("A3").value = "Load values";
+      loads.getCell("B3").value = 100;
+      loads.getCell("B4").value = 200;
+      loads.getCell("B5").value = 300;
+
+      const summary = workbook.addWorksheet("Summary");
+      summary.getCell("A1").value = "Cross-sheet range summary";
+      summary.getCell("A3").value = "Total";
+      summary.getCell("B3").value = { formula: "SUM(Loads!B3:B5)", result: 600 };
+      summary.getCell("A4").value = "Average";
+      summary.getCell("B4").value = { formula: "AVERAGE(Loads!B3:B5)", result: 200 };
+
+      workbook.definedNames.add("Loads!$B$3", "load_a");
+      workbook.definedNames.add("Summary!$B$3", "range_total");
+      workbook.definedNames.add("Summary!$B$4", "range_average");
+    },
+  },
+  {
+    fileName: "import-test-15-workbook-review-after-cross-sheet-support.xlsx",
+    build(workbook) {
+      const inputs = workbook.addWorksheet("Supported Inputs");
+      inputs.getCell("A1").value = "Supported cross-sheet source";
+      inputs.getCell("A3").value = "Input";
+      inputs.getCell("B3").value = 10;
+
+      const review = workbook.addWorksheet("Review Items");
+      review.getCell("A1").value = "Review after cross-sheet support";
+      review.getCell("A3").value = "Supported cross-sheet";
+      review.getCell("B3").value = { formula: "'Supported Inputs'!B3*2", result: 20 };
+      review.getCell("A4").value = "Structured table";
+      review.getCell("B4").value = { formula: "SUM(Table3[Amount])", result: 100 };
+      review.getCell("A5").value = "External workbook";
+      review.getCell("B5").value = { formula: "SUM('[Legacy.xlsx]Sheet1'!A1)", result: 5 };
+      review.getCell("A6").value = "Semicolon separator";
+      review.getCell("B6").value = { formula: "SUM(B3;B4)", result: 120 };
+
+      workbook.definedNames.add("'Supported Inputs'!$B$3", "supported_input");
+      workbook.definedNames.add("'Review Items'!$B$3", "supported_cross_sheet_total");
+    },
+  },
 ];
 
 for (const fixture of fixtures) {

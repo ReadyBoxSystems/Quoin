@@ -82,10 +82,6 @@ function reviewImportedFormula(
     warningMessages.push("external workbook reference");
   }
 
-  if (/(^|[^A-Za-z0-9_])'[^']+'!|(^|[^A-Za-z0-9_])[A-Za-z0-9_ ]+!/.test(formula)) {
-    warningMessages.push("cross-sheet reference");
-  }
-
   if (/[A-Za-z_][A-Za-z0-9_]*\[[^\]]+\]/.test(formula)) {
     warningMessages.push("structured table reference");
   }

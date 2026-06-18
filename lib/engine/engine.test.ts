@@ -1,4 +1,4 @@
-import { executeEngine, type EngineCell } from "./index";
+import { executeEngine, executeWorkbookEngine, type EngineCell } from "./index";
 
 let failed = 0;
 
@@ -273,6 +273,74 @@ test("is deterministic", () => {
   };
 
   assertEq(executeEngine(input), executeEngine(input), "same input should produce same result");
+});
+
+test("evaluates workbook cross-sheet coordinate references", () => {
+  const result = executeWorkbookEngine({
+    sheets: [
+      {
+        id: "inputs",
+        name: "Inputs",
+        cells: [
+          cell({ id: "B2", address: "B2", name: "span", role: "input", value: 14, surfaced: true }),
+          cell({ id: "B3", address: "B3", name: "plf", role: "input", value: 650, surfaced: true }),
+        ],
+      },
+      {
+        id: "calculator",
+        name: "Calculator",
+        cells: [
+          cell({ id: "B2", address: "B2", name: "total_load", role: "output", formula: "Inputs!B2 * Inputs!B3", surfaced: true }),
+        ],
+      },
+    ],
+  });
+
+  assertEq(result.valid, true, "workbook engine should be valid");
+  assertEq(result.outputs["Calculator!total_load"], 9100, "cross-sheet formula should evaluate");
+  assertEq(result.sheetResults[1].result.outputs.total_load, 9100, "sheet result should expose local output");
+});
+
+test("evaluates quoted sheet names with spaces", () => {
+  const result = executeWorkbookEngine({
+    sheets: [
+      {
+        id: "input-data",
+        name: "Input Data",
+        cells: [cell({ id: "B2", address: "B2", name: "quantity", role: "input", value: 8 })],
+      },
+      {
+        id: "calc-sheet",
+        name: "Calc Sheet",
+        cells: [cell({ id: "B2", address: "B2", name: "total", role: "output", formula: "'Input Data'!B2 * 3", surfaced: true })],
+      },
+    ],
+  });
+
+  assertEq(result.valid, true, "quoted sheet name formula should be valid");
+  assertEq(result.outputs["Calc Sheet!total"], 24, "quoted sheet name formula should evaluate");
+});
+
+test("reports duplicate workbook smart cell names", () => {
+  const result = executeWorkbookEngine({
+    sheets: [
+      {
+        id: "a",
+        name: "A",
+        cells: [cell({ id: "A1", address: "A1", name: "span", role: "input", value: 10 })],
+      },
+      {
+        id: "b",
+        name: "B",
+        cells: [cell({ id: "A1", address: "A1", name: "span", role: "input", value: 12 })],
+      },
+    ],
+  });
+
+  assertEq(result.valid, false, "duplicate names should invalidate workbook result");
+  if (!result.errors.some((error) => error.message.includes("Duplicate Smart Cell name"))) {
+    throw new Error("expected duplicate Smart Cell name error");
+  }
 });
 
 if (failed > 0) {

@@ -15,6 +15,9 @@ const fixtureFiles = [
   "import-test-10-sheet-names-with-spaces.xlsx",
   "import-test-11-sparse-large-sheet.xlsx",
   "import-test-12-workbook-review-mix.xlsx",
+  "import-test-13-workbook-runner-cross-sheet.xlsx",
+  "import-test-14-cross-sheet-range.xlsx",
+  "import-test-15-workbook-review-after-cross-sheet-support.xlsx",
 ];
 
 for (const fileName of fixtureFiles) {

@@ -25,6 +25,7 @@ export interface RuleDefinition {
 export interface EngineCell {
   id: string;
   address: string;
+  references?: string[];
   name?: string | null;
   role: SmartCellRole;
   type: SmartCellType;
@@ -39,6 +40,17 @@ export interface EngineCell {
 
 export interface EngineInput {
   cells: EngineCell[];
+  inputs?: Record<string, CellValue>;
+}
+
+export interface WorkbookEngineSheet {
+  id: string;
+  name: string;
+  cells: EngineCell[];
+}
+
+export interface WorkbookEngineInput {
+  sheets: WorkbookEngineSheet[];
   inputs?: Record<string, CellValue>;
 }
 
@@ -64,4 +76,19 @@ export interface EngineResult {
   errors: EngineIssue[];
   warnings: EngineIssue[];
   ruleStates: RuleState[];
+}
+
+export interface WorkbookEngineSheetResult {
+  sheetId: string;
+  sheetName: string;
+  result: EngineResult;
+}
+
+export interface WorkbookEngineResult {
+  valid: boolean;
+  outputs: Record<string, CellValue>;
+  errors: EngineIssue[];
+  warnings: EngineIssue[];
+  ruleStates: RuleState[];
+  sheetResults: WorkbookEngineSheetResult[];
 }

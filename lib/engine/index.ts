@@ -1,5 +1,16 @@
 import { all, create, type MathJsInstance, type MathNode } from "mathjs";
-import type { CellValue, EngineCell, EngineInput, EngineIssue, EngineResult, RuleState } from "./types";
+import type {
+  CellValue,
+  EngineCell,
+  EngineInput,
+  EngineIssue,
+  EngineResult,
+  RuleState,
+  WorkbookEngineInput,
+  WorkbookEngineResult,
+  WorkbookEngineSheet,
+  WorkbookEngineSheetResult,
+} from "./types";
 
 const math = create(all, {}) as MathJsInstance;
 
@@ -67,6 +78,10 @@ export type {
   RuleState,
   SmartCellRole,
   SmartCellType,
+  WorkbookEngineInput,
+  WorkbookEngineResult,
+  WorkbookEngineSheet,
+  WorkbookEngineSheetResult,
 } from "./types";
 
 export function executeEngine(input: EngineInput): EngineResult {
@@ -84,7 +99,7 @@ export function executeEngine(input: EngineInput): EngineResult {
     for (const ref of refs) {
       const dependency = indexes.byReference.get(ref);
       if (!dependency) {
-        if (isCellReference(ref)) continue;
+        if (isCellReference(ref) || isScopedCellReference(ref)) continue;
         errors.push(issue(cell, `Missing reference "${ref}".`));
         continue;
       }
@@ -112,6 +127,7 @@ export function executeEngine(input: EngineInput): EngineResult {
     valuesById.set(cell.id, value);
     scope[cell.address] = value;
     if (cell.name) scope[cell.name] = value;
+    for (const reference of cell.references ?? []) scope[reference] = value;
   }
 
   for (const cell of cells) {
@@ -160,6 +176,91 @@ export function executeEngine(input: EngineInput): EngineResult {
   };
 }
 
+export function executeWorkbookEngine(input: WorkbookEngineInput): WorkbookEngineResult {
+  const duplicateNames = duplicateWorkbookNames(input.sheets);
+  const duplicateNameSet = new Set(duplicateNames);
+  const cellMeta = new Map<string, { sheetId: string; sheetName: string; original: EngineCell; internal: EngineCell }>();
+  const sheetLookup = buildSheetLookup(input.sheets);
+  const internalCells: EngineCell[] = [];
+
+  for (const [sheetIndex, sheet] of input.sheets.entries()) {
+    for (const original of sheet.cells) {
+      const internalAddress = scopedAddress(sheetIndex, original.address);
+      const name = original.name && !duplicateNameSet.has(original.name) ? original.name : null;
+      const internal: EngineCell = {
+        ...original,
+        id: scopedCellId(sheet.id, original.id),
+        address: internalAddress,
+        name,
+        formula: original.formula ? transformWorkbookExpression(original.formula, sheet, sheetIndex, sheetLookup) : original.formula,
+        references: [...(original.references ?? []), `${sheet.name}!${original.address}`],
+      };
+
+      if (original.lookup) {
+        internal.lookup = {
+          ...original.lookup,
+          inputMap: Object.fromEntries(
+            Object.entries(original.lookup.inputMap).map(([column, reference]) => [
+              column,
+              transformWorkbookReference(reference, sheet, sheetIndex, sheetLookup),
+            ]),
+          ),
+        };
+      }
+
+      if (original.validation) {
+        internal.validation = {
+          ...original.validation,
+          condition: transformWorkbookExpression(original.validation.condition, sheet, sheetIndex, sheetLookup),
+        };
+      }
+
+      if (original.compliance) {
+        internal.compliance = {
+          ...original.compliance,
+          condition: transformWorkbookExpression(original.compliance.condition, sheet, sheetIndex, sheetLookup),
+        };
+      }
+
+      cellMeta.set(internal.id, { sheetId: sheet.id, sheetName: sheet.name, original, internal });
+      internalCells.push(internal);
+    }
+  }
+
+  const duplicateIssues = duplicateNameIssues(input.sheets, duplicateNames);
+  const result = executeEngine({
+    cells: internalCells,
+    inputs: transformWorkbookInputs(input.inputs ?? {}, input.sheets, sheetLookup),
+  });
+  const remappedErrors = [...remapWorkbookIssues(result.errors, cellMeta), ...duplicateIssues];
+  const remappedWarnings = remapWorkbookIssues(result.warnings, cellMeta);
+  const remappedRuleStates = result.ruleStates.map((rule) => {
+    const meta = cellMeta.get(rule.cellId);
+    return {
+      ...rule,
+      address: meta ? meta.original.address : rule.address,
+      name: meta ? meta.original.name : rule.name,
+    };
+  });
+  const sheetResults = buildWorkbookSheetResults(input.sheets, result, cellMeta, remappedErrors, remappedWarnings, remappedRuleStates);
+  const outputs: Record<string, CellValue> = {};
+
+  for (const sheetResult of sheetResults) {
+    for (const [key, value] of Object.entries(sheetResult.result.outputs)) {
+      outputs[`${sheetResult.sheetName}!${key}`] = value;
+    }
+  }
+
+  return {
+    valid: result.valid && duplicateIssues.length === 0,
+    outputs,
+    errors: remappedErrors,
+    warnings: remappedWarnings,
+    ruleStates: remappedRuleStates,
+    sheetResults,
+  };
+}
+
 function buildIndexes(cells: EngineCell[]) {
   const byId = new Map<string, EngineCell>();
   const byReference = new Map<string, EngineCell>();
@@ -168,6 +269,7 @@ function buildIndexes(cells: EngineCell[]) {
     byId.set(cell.id, cell);
     byReference.set(cell.address, cell);
     if (cell.name) byReference.set(cell.name, cell);
+    for (const reference of cell.references ?? []) byReference.set(reference, cell);
   }
 
   return { byId, byReference };
@@ -281,7 +383,7 @@ function evaluateExpression(
     const node = parseExpression(expression);
     const expressionScope = { ...scope };
     for (const ref of referencesForExpression(expression)) {
-      if (isCellReference(ref) && !(ref in expressionScope)) expressionScope[ref] = 0;
+      if ((isCellReference(ref) || isScopedCellReference(ref)) && !(ref in expressionScope)) expressionScope[ref] = 0;
     }
     const result = node.evaluate(expressionScope);
     return normalizeValue(result);
@@ -383,6 +485,10 @@ function isCellReference(reference: string): boolean {
   return parseCellReference(reference.toUpperCase()) !== null;
 }
 
+function isScopedCellReference(reference: string): boolean {
+  return /^__sheet\d+_[A-Z]+[1-9]\d*$/.test(reference);
+}
+
 function columnNumber(column: string): number {
   return column.split("").reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0);
 }
@@ -463,6 +569,222 @@ function emptyResult(
     warnings,
     ruleStates,
   };
+}
+
+function duplicateWorkbookNames(sheets: WorkbookEngineSheet[]): string[] {
+  const counts = new Map<string, number>();
+
+  for (const sheet of sheets) {
+    for (const cell of sheet.cells) {
+      if (!cell.name) continue;
+      counts.set(cell.name, (counts.get(cell.name) ?? 0) + 1);
+    }
+  }
+
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name);
+}
+
+function duplicateNameIssues(sheets: WorkbookEngineSheet[], duplicateNames: string[]): EngineIssue[] {
+  const duplicateNameSet = new Set(duplicateNames);
+  const issues: EngineIssue[] = [];
+
+  for (const sheet of sheets) {
+    for (const cell of sheet.cells) {
+      if (!cell.name || !duplicateNameSet.has(cell.name)) continue;
+      issues.push({
+        cellId: scopedCellId(sheet.id, cell.id),
+        address: cell.address,
+        name: cell.name,
+        message: `Duplicate Smart Cell name "${cell.name}" appears on more than one Sheet. Rename one before using workbook-level formulas.`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+function buildSheetLookup(sheets: WorkbookEngineSheet[]) {
+  const byName = new Map<string, { sheet: WorkbookEngineSheet; index: number }>();
+
+  for (const [index, sheet] of sheets.entries()) {
+    byName.set(normalizeSheetName(sheet.name), { sheet, index });
+  }
+
+  return byName;
+}
+
+function scopedCellId(sheetId: string, cellId: string): string {
+  return `${sheetId}!${cellId}`;
+}
+
+function scopedAddress(sheetIndex: number, address: string): string {
+  return `__sheet${sheetIndex}_${normalizeAddress(address)}`;
+}
+
+function normalizeAddress(address: string): string {
+  return address.replace(/\$/g, "").toUpperCase();
+}
+
+function normalizeSheetName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function transformWorkbookInputs(
+  inputs: Record<string, CellValue>,
+  sheets: WorkbookEngineSheet[],
+  sheetLookup: Map<string, { sheet: WorkbookEngineSheet; index: number }>,
+): Record<string, CellValue> {
+  const transformed: Record<string, CellValue> = {};
+
+  for (const [key, value] of Object.entries(inputs)) {
+    transformed[key] = value;
+    for (const sheet of sheets) {
+      const sheetIndex = sheetLookup.get(normalizeSheetName(sheet.name))?.index ?? 0;
+      transformed[transformWorkbookReference(key, sheet, sheetIndex, sheetLookup)] = value;
+    }
+  }
+
+  return transformed;
+}
+
+function transformWorkbookReference(
+  reference: string,
+  currentSheet: WorkbookEngineSheet,
+  currentSheetIndex: number,
+  sheetLookup: Map<string, { sheet: WorkbookEngineSheet; index: number }>,
+): string {
+  return transformWorkbookExpression(reference, currentSheet, currentSheetIndex, sheetLookup);
+}
+
+function transformWorkbookExpression(
+  expression: string,
+  currentSheet: WorkbookEngineSheet,
+  currentSheetIndex: number,
+  sheetLookup: Map<string, { sheet: WorkbookEngineSheet; index: number }>,
+): string {
+  let next = expression;
+
+  next = next.replace(
+    /'((?:[^']|'')+)'\!\$?([A-Z]+)\$?([1-9]\d*)\s*:\s*\$?([A-Z]+)\$?([1-9]\d*)/gi,
+    (match, sheetName: string, startColumn: string, startRow: string, endColumn: string, endRow: string) => {
+      return scopedRangeForSheet(unescapeSheetName(sheetName), `${startColumn}${startRow}`, `${endColumn}${endRow}`, sheetLookup) ?? match;
+    },
+  );
+
+  next = next.replace(
+    /\b([A-Za-z_][A-Za-z0-9_]*)\!\$?([A-Z]+)\$?([1-9]\d*)\s*:\s*\$?([A-Z]+)\$?([1-9]\d*)/g,
+    (match, sheetName: string, startColumn: string, startRow: string, endColumn: string, endRow: string) => {
+      return scopedRangeForSheet(sheetName, `${startColumn}${startRow}`, `${endColumn}${endRow}`, sheetLookup) ?? match;
+    },
+  );
+
+  next = next.replace(
+    /'((?:[^']|'')+)'\!\$?([A-Z]+)\$?([1-9]\d*)/gi,
+    (match, sheetName: string, column: string, row: string) => {
+      return scopedAddressForSheet(unescapeSheetName(sheetName), `${column}${row}`, sheetLookup) ?? match;
+    },
+  );
+
+  next = next.replace(
+    /\b([A-Za-z_][A-Za-z0-9_]*)\!\$?([A-Z]+)\$?([1-9]\d*)/g,
+    (match, sheetName: string, column: string, row: string) => {
+      return scopedAddressForSheet(sheetName, `${column}${row}`, sheetLookup) ?? match;
+    },
+  );
+
+  next = next.replace(
+    /\b\$?([A-Z]+)\$?([1-9]\d*)\s*:\s*\$?([A-Z]+)\$?([1-9]\d*)\b/g,
+    (_match, startColumn: string, startRow: string, endColumn: string, endRow: string) => {
+      return expandWorkbookRange(currentSheetIndex, `${startColumn}${startRow}`, `${endColumn}${endRow}`).join(", ");
+    },
+  );
+
+  next = next.replace(/\b\$?([A-Z]+)\$?([1-9]\d*)\b/g, (_match, column: string, row: string) => {
+    return scopedAddress(currentSheetIndex, `${column}${row}`);
+  });
+
+  return next;
+}
+
+function scopedAddressForSheet(
+  sheetName: string,
+  address: string,
+  sheetLookup: Map<string, { sheet: WorkbookEngineSheet; index: number }>,
+): string | null {
+  const matched = sheetLookup.get(normalizeSheetName(sheetName));
+  if (!matched) return null;
+  return scopedAddress(matched.index, address);
+}
+
+function scopedRangeForSheet(
+  sheetName: string,
+  start: string,
+  end: string,
+  sheetLookup: Map<string, { sheet: WorkbookEngineSheet; index: number }>,
+): string | null {
+  const matched = sheetLookup.get(normalizeSheetName(sheetName));
+  if (!matched) return null;
+  return expandWorkbookRange(matched.index, start, end).join(", ");
+}
+
+function expandWorkbookRange(sheetIndex: number, start: string, end: string): string[] {
+  return expandRange(normalizeAddress(start), normalizeAddress(end)).map((address) => scopedAddress(sheetIndex, address));
+}
+
+function unescapeSheetName(name: string): string {
+  return name.replace(/''/g, "'");
+}
+
+function remapWorkbookIssues(
+  issues: EngineIssue[],
+  cellMeta: Map<string, { sheetId: string; sheetName: string; original: EngineCell; internal: EngineCell }>,
+): EngineIssue[] {
+  return issues.map((item) => {
+    const meta = cellMeta.get(item.cellId);
+    if (!meta) return item;
+    return {
+      ...item,
+      address: meta.original.address,
+      name: meta.original.name,
+    };
+  });
+}
+
+function buildWorkbookSheetResults(
+  sheets: WorkbookEngineSheet[],
+  result: EngineResult,
+  cellMeta: Map<string, { sheetId: string; sheetName: string; original: EngineCell; internal: EngineCell }>,
+  errors: EngineIssue[],
+  warnings: EngineIssue[],
+  ruleStates: RuleState[],
+): WorkbookEngineSheetResult[] {
+  return sheets.map((sheet) => {
+    const sheetCells = [...cellMeta.values()].filter((meta) => meta.sheetId === sheet.id);
+    const sheetCellIds = new Set(sheetCells.map((meta) => meta.internal.id));
+    const values: Record<string, CellValue> = {};
+    const outputs: Record<string, CellValue> = {};
+
+    for (const meta of sheetCells) {
+      const value = result.values[meta.internal.name ?? meta.internal.address] ?? result.values[meta.internal.address] ?? null;
+      values[meta.original.address] = value;
+      if (meta.original.name) values[meta.original.name] = value;
+      if (meta.original.surfaced) outputs[meta.original.name ?? meta.original.address] = value;
+    }
+
+    return {
+      sheetId: sheet.id,
+      sheetName: sheet.name,
+      result: {
+        valid: result.valid && !errors.some((item) => sheetCellIds.has(item.cellId)),
+        values,
+        outputs,
+        executionOrder: result.executionOrder.filter((id) => sheetCellIds.has(id)),
+        errors: errors.filter((item) => sheetCellIds.has(item.cellId)),
+        warnings: warnings.filter((item) => sheetCellIds.has(item.cellId)),
+        ruleStates: ruleStates.filter((item) => sheetCellIds.has(item.cellId)),
+      },
+    };
+  });
 }
 
 function issue(cell: EngineCell, message: string): EngineIssue {

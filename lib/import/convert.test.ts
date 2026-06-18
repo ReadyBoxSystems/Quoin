@@ -147,7 +147,7 @@ runTest("flags imported formulas that need compatibility review", () => {
   );
 
   assert.equal(converted.cells.A1.entry, "=Inputs!B2*2");
-  assert.equal(converted.reviewItems.filter((item) => item.message.includes("cross-sheet reference")).length, 2);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("cross-sheet reference")).length, 0);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("structured table reference")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("external workbook reference")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("semicolon argument separator")).length, 1);

@@ -1074,6 +1074,22 @@ h1 {
   font-weight: 400;
 }
 
+.runnerSheetGroup {
+  display: grid;
+  gap: 10px;
+}
+
+.runnerSheetGroup h4 {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 2px 0 0;
+  padding-bottom: 5px;
+  text-transform: uppercase;
+}
+
 .runnerResult strong {
   color: var(--ink);
   font-size: 22px;
