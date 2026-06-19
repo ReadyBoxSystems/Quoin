@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs/dist/exceljs.min.js";
 import type { Cell, CellValue, Worksheet } from "exceljs";
-import type { ImportedCell, ImportedCellValue, ImportedName, ImportedNameKind, ImportedWorkbook, ImportReviewItem } from "./types";
+import type { ImportedCell, ImportedCellValue, ImportedMerge, ImportedName, ImportedNameKind, ImportedWorkbook, ImportReviewItem } from "./types";
 
 interface DefinedNameRange {
   name: string;
@@ -25,13 +25,30 @@ export async function readExcelWorkbook(fileName: string, data: ArrayBuffer): Pr
 
 function readWorksheet(worksheet: Worksheet, reviewItems: ImportReviewItem[]) {
   const cells: ImportedCell[] = [];
+  const merges = readMergedRanges(worksheet);
+  const mergedCoveredCells = new Set(merges.flatMap((merge) => addressesInRange(merge.range).filter((address) => address !== merge.topLeft)));
   let maxRow = 0;
   let maxColumn = 0;
+
+  for (const merge of merges) {
+    const bottomRight = parseCellAddress(merge.bottomRight);
+    if (bottomRight) {
+      maxRow = Math.max(maxRow, bottomRight.row);
+      maxColumn = Math.max(maxColumn, bottomRight.column);
+    }
+    reviewItems.push({
+      severity: "info",
+      sheetName: worksheet.name,
+      address: merge.topLeft,
+      message: `Merged Excel range ${merge.range} was detected. Quoin imported the top-left cell only; covered cells were left blank for review.`,
+    });
+  }
 
   worksheet.eachRow((row, rowNumber) => {
     maxRow = Math.max(maxRow, rowNumber);
     row.eachCell((cell, columnNumber) => {
       maxColumn = Math.max(maxColumn, columnNumber);
+      if (mergedCoveredCells.has(cell.address.toUpperCase())) return;
       const importedCell = readCell(cell, worksheet.name, reviewItems);
       if (importedCell.kind !== "blank") cells.push(importedCell);
     });
@@ -45,7 +62,19 @@ function readWorksheet(worksheet: Worksheet, reviewItems: ImportReviewItem[]) {
       columnCount: maxColumn,
     },
     cells,
+    merges,
   };
+}
+
+function readMergedRanges(worksheet: Worksheet): ImportedMerge[] {
+  const model = worksheet.model as { merges?: string[] };
+  const ranges = Array.isArray(model.merges) ? model.merges : [];
+  return ranges
+    .map((range) => {
+      const parsed = parseRange(range);
+      return parsed ? { range: parsed.range, topLeft: parsed.topLeft, bottomRight: parsed.bottomRight } : null;
+    })
+    .filter((merge): merge is ImportedMerge => merge !== null);
 }
 
 function readCell(cell: Cell, sheetName: string, reviewItems: ImportReviewItem[]): ImportedCell {
@@ -126,6 +155,71 @@ function importedValueFromCellValue(
     message: "Skipped a cell with an unsupported Excel value type.",
   });
   return undefined;
+}
+
+function parseRange(range: string): { range: string; topLeft: string; bottomRight: string } | null {
+  const [start, end] = range.split(":").map((part) => normalizeAddress(part));
+  if (!start || !end) return null;
+  return {
+    range: `${start}:${end}`,
+    topLeft: start,
+    bottomRight: end,
+  };
+}
+
+function addressesInRange(range: string): string[] {
+  const parsed = parseRange(range);
+  if (!parsed) return [];
+
+  const start = parseCellAddress(parsed.topLeft);
+  const end = parseCellAddress(parsed.bottomRight);
+  if (!start || !end) return [];
+
+  const firstColumn = Math.min(start.column, end.column);
+  const lastColumn = Math.max(start.column, end.column);
+  const firstRow = Math.min(start.row, end.row);
+  const lastRow = Math.max(start.row, end.row);
+  const addresses: string[] = [];
+
+  for (let row = firstRow; row <= lastRow; row += 1) {
+    for (let column = firstColumn; column <= lastColumn; column += 1) {
+      addresses.push(`${columnName(column)}${row}`);
+    }
+  }
+
+  return addresses;
+}
+
+function normalizeAddress(address: string): string | null {
+  const normalized = address.replace(/\$/g, "").toUpperCase();
+  return /^[A-Z]+[1-9]\d*$/.test(normalized) ? normalized : null;
+}
+
+function parseCellAddress(address: string): { column: number; row: number } | null {
+  const normalized = normalizeAddress(address);
+  const match = normalized?.match(/^([A-Z]+)([1-9]\d*)$/);
+  if (!match) return null;
+  return {
+    column: columnNumber(match[1]),
+    row: Number(match[2]),
+  };
+}
+
+function columnNumber(column: string): number {
+  return column.split("").reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0);
+}
+
+function columnName(column: number): string {
+  let remaining = column;
+  let name = "";
+
+  while (remaining > 0) {
+    const modulo = (remaining - 1) % 26;
+    name = String.fromCharCode(65 + modulo) + name;
+    remaining = Math.floor((remaining - modulo) / 26);
+  }
+
+  return name;
 }
 
 function readDefinedNames(model: DefinedNameRange[]): ImportedName[] {

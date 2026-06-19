@@ -64,6 +64,29 @@ async function main() {
     );
   });
 
+  await runTest("detects merged cells without importing covered duplicates", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Merged");
+
+    worksheet.getCell("A1").value = "Merged note";
+    worksheet.mergeCells("A1:A3");
+    worksheet.getCell("B1").value = "Normal";
+
+    const imported = await readExcelWorkbook("merged.xlsx", await workbookToArrayBuffer(workbook));
+    const sheet = imported.sheets[0];
+
+    assert.deepEqual(sheet.merges, [{ range: "A1:A3", topLeft: "A1", bottomRight: "A3" }]);
+    assert.deepEqual(
+      sheet.cells.map((cell) => [cell.address, cell.kind, cell.value]),
+      [
+        ["A1", "value", "Merged note"],
+        ["B1", "value", "Normal"],
+      ],
+    );
+    assert.equal(sheet.dimensions.rowCount, 3);
+    assert.equal(imported.reviewItems.some((item) => item.message.includes("Merged Excel range A1:A3")), true);
+  });
+
   console.log("All workbook reader tests passed");
 }
 

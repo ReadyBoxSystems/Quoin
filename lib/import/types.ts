@@ -11,6 +11,12 @@ export interface ImportedCell {
   formula?: string;
 }
 
+export interface ImportedMerge {
+  range: string;
+  topLeft: string;
+  bottomRight: string;
+}
+
 export interface ImportedSheetDimensions {
   rowCount: number;
   columnCount: number;
@@ -21,6 +27,7 @@ export interface ImportedSheet {
   name: string;
   dimensions: ImportedSheetDimensions;
   cells: ImportedCell[];
+  merges?: ImportedMerge[];
 }
 
 export type ImportedNameKind = "singleCell" | "range" | "formula" | "external" | "unknown";

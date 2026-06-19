@@ -34,16 +34,6 @@ interface DependencySummary {
   dependents: DependencyItem[];
 }
 
-interface ImportReport {
-  fileName: string;
-  sheetName: string;
-  sheetCount: number;
-  cellCount: number;
-  formulaCount: number;
-  promotedNameCount: number;
-  reviewItems: ImportReviewItem[];
-}
-
 interface RunnerSheetContext {
   sheetId: string;
   sheetName: string;
@@ -232,7 +222,6 @@ export function VariableSheet() {
   const [isImporting, setIsImporting] = useState(false);
   const [importMessage, setImportMessage] = useState("");
   const [importError, setImportError] = useState("");
-  const [lastImportReport, setLastImportReport] = useState<ImportReport | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const cellRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -247,6 +236,7 @@ export function VariableSheet() {
     () => buildDisplayValues(cells, result.values, result.errors, ruleStateMap, columns, rowCount),
     [cells, columns, result.errors, result.values, rowCount, ruleStateMap],
   );
+  const columnWidths = useMemo(() => buildColumnWidths(cells, displayValues, columns, rowCount), [cells, columns, displayValues, rowCount]);
   const referenceOptions = useMemo(() => buildReferenceOptions(cells, displayValues, columns, rowCount), [cells, columns, displayValues, rowCount]);
   const filteredReferenceOptions = useMemo(() => {
     const query = getReferenceQuery(draftEntry);
@@ -907,7 +897,6 @@ export function VariableSheet() {
     setImportMessage("");
     setImportError("");
     setPendingImport(null);
-    setLastImportReport(null);
 
     if (!file.name.toLowerCase().endsWith(".xlsx")) {
       setImportError("Choose an .xlsx workbook.");
@@ -925,7 +914,7 @@ export function VariableSheet() {
 
       setPendingImport(workbook);
       setSelectedImportSheetId(workbook.sheets[0].id);
-      setImportMessage(`Read ${workbook.sheets.length} worksheet${workbook.sheets.length === 1 ? "" : "s"} from ${file.name}.`);
+      setImportMessage(`Read ${workbook.sheets.length} Sheet${workbook.sheets.length === 1 ? "" : "s"} from ${file.name}.`);
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Could not read that workbook.");
     } finally {
@@ -954,16 +943,6 @@ export function VariableSheet() {
     const selectedIndex = Math.max(0, pendingImport.sheets.findIndex((sheet) => sheet.id === selectedSheet.id));
     const activeImportedSheet = convertedSheets[selectedIndex] ?? convertedSheets[0];
     const workbookSheets = convertedSheets.map((sheet) => sheet.workbookSheet);
-    const reviewItems = [
-      ...pendingImport.reviewItems,
-      ...convertedSheets.flatMap((sheet) => sheet.converted.reviewItems),
-    ];
-    const importedFormulaCount = pendingImport.sheets.reduce(
-      (count, sheet) => count + sheet.cells.filter((cell) => cell.kind === "formula").length,
-      0,
-    );
-    const importedCellCount = convertedSheets.reduce((count, sheet) => count + Object.keys(sheet.converted.cells).length, 0);
-    const promotedNameCount = convertedSheets.reduce((count, sheet) => count + sheet.converted.promotedNameCount, 0);
     const configurationName = makeImportedConfigurationName(pendingImport.fileName);
     const created = makeConfiguration(
       configurationName,
@@ -980,18 +959,7 @@ export function VariableSheet() {
     loadConfiguration(created);
     setPendingImport(null);
     setImportError("");
-    setLastImportReport({
-      fileName: pendingImport.fileName,
-      sheetName: selectedSheet.name,
-      sheetCount: pendingImport.sheets.length,
-      cellCount: importedCellCount,
-      formulaCount: importedFormulaCount,
-      promotedNameCount,
-      reviewItems,
-    });
-    setImportMessage(
-      `Imported ${pendingImport.sheets.length} sheet${pendingImport.sheets.length === 1 ? "" : "s"} from ${pendingImport.fileName}: ${importedCellCount} cells, ${importedFormulaCount} formulas, ${promotedNameCount} named cells, ${reviewItems.length} review items.`,
-    );
+    setImportMessage("");
     setActiveView("sheet");
   }
 
@@ -1085,7 +1053,7 @@ export function VariableSheet() {
         </div>
       </header>
 
-      {(pendingImport || importMessage || importError || lastImportReport) && (
+      {(pendingImport || importError) && (
         <section className="importPanel" aria-label="Excel import">
           <div className="importPanelHeader">
             <div>
@@ -1128,35 +1096,6 @@ export function VariableSheet() {
             </div>
           )}
 
-          {lastImportReport && !pendingImport && (
-            <div className="importReport">
-              <div className="importStats">
-                <span>{lastImportReport.sheetCount} sheets</span>
-                <span>{lastImportReport.cellCount} cells</span>
-                <span>{lastImportReport.formulaCount} formulas</span>
-                <span>{lastImportReport.promotedNameCount} named cells</span>
-                <span>{lastImportReport.reviewItems.length} review items</span>
-              </div>
-              {lastImportReport.reviewItems.length > 0 ? (
-                <div className="importReviewList">
-                  {lastImportReport.reviewItems.slice(0, 8).map((item, index) => (
-                    <p key={`${item.sheetName ?? lastImportReport.sheetName}-${item.address ?? item.name ?? index}-${index}`} data-severity={item.severity}>
-                      <strong>{item.address ?? item.name ?? "Workbook"}</strong>
-                      <span>{item.message}</span>
-                    </p>
-                  ))}
-                  {lastImportReport.reviewItems.length > 8 && (
-                    <p data-severity="info">
-                      <strong>More</strong>
-                      <span>{lastImportReport.reviewItems.length - 8} additional review items.</span>
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p className="importMessage">No import compatibility review items.</p>
-              )}
-            </div>
-          )}
         </section>
       )}
 
@@ -1219,8 +1158,8 @@ export function VariableSheet() {
               <div
                 className="spreadsheetGrid"
                 style={{
-                  gridTemplateColumns: `44px repeat(${columnCount}, minmax(116px, 1fr))`,
-                  minWidth: 44 + columnCount * 116,
+                  gridTemplateColumns: `44px ${columnWidths.map((width) => `minmax(${width}px, 1fr)`).join(" ")}`,
+                  minWidth: 44 + columnWidths.reduce((total, width) => total + width, 0),
                 }}
               >
                 <div className="sheetCorner" />
@@ -1285,7 +1224,7 @@ export function VariableSheet() {
 
       <section className="runnerStrip">
         <div>
-          <span>Surfaced Outputs</span>
+          <span>Outputs</span>
           <strong>{formatOutputs(workbookResult.outputs)}</strong>
         </div>
         <div>
@@ -1649,50 +1588,46 @@ function RunnerPreview({
         </div>
       </div>
 
-      <div className="runnerMessages">
-        <div>
-          <h3>Shop Actions</h3>
-          {actionGroups.length === 0 ? (
-            <p className="runnerEmpty">No shop actions.</p>
-          ) : (
-            actionGroups.map((group) => (
-              <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
-                {group.items.map((cell) => (
-                  <p data-state="action" key={`${group.sheetId}-${cell.address}`}>
-                    <strong>ACTION</strong>
-                    {formatCellValue(group.displayValues[cell.address] ?? null) || labelForCell(cell)}
-                  </p>
-                ))}
-              </RunnerSheetGroup>
-            ))
+      {(actionGroups.length > 0 || warningGroups.length > 0) && (
+        <div className="runnerMessages">
+          {actionGroups.length > 0 && (
+            <div>
+              <h3>Shop Actions</h3>
+              {actionGroups.map((group) => (
+                <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
+                  {group.items.map((cell) => (
+                    <p data-state="action" key={`${group.sheetId}-${cell.address}`}>
+                      <strong>ACTION</strong>
+                      {formatCellValue(group.displayValues[cell.address] ?? null) || labelForCell(cell)}
+                    </p>
+                  ))}
+                </RunnerSheetGroup>
+              ))}
+            </div>
+          )}
+          {warningGroups.length > 0 && (
+            <div>
+              <h3>Review Flags</h3>
+              {warningGroups.map((group) => (
+                <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
+                  {group.items.map((warning) => (
+                    <p data-state="warn" key={warning.cellId}>
+                      <strong>WARN</strong>
+                      {warning.message}
+                    </p>
+                  ))}
+                </RunnerSheetGroup>
+              ))}
+            </div>
           )}
         </div>
-        <div>
-          <h3>Review Flags</h3>
-          {warningGroups.length === 0 ? (
-            <p className="runnerEmpty">No review flags.</p>
-          ) : (
-            warningGroups.map((group) => (
-              <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
-                {group.items.map((warning) => (
-                  <p data-state="warn" key={warning.cellId}>
-                    <strong>WARN</strong>
-                    {warning.message}
-                  </p>
-                ))}
-              </RunnerSheetGroup>
-            ))
-          )}
-        </div>
-      </div>
+      )}
 
-      <div className="runnerMessages">
-        <div>
-          <h3>Validation</h3>
-          {validationGroups.length === 0 ? (
-            <p className="runnerEmpty">No validation rules.</p>
-          ) : (
-            validationGroups.map((group) => (
+      {validationGroups.length > 0 && (
+        <div className="runnerMessages runnerMessagesSingle">
+          <div>
+            <h3>Validation</h3>
+            {validationGroups.map((group) => (
               <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
                 {group.items.map((rule) => {
                   const cell = getCell(group.cells, rule.address);
@@ -1704,10 +1639,10 @@ function RunnerPreview({
                   );
                 })}
               </RunnerSheetGroup>
-            ))
-          )}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }
@@ -1766,6 +1701,19 @@ function HelpPanel() {
         <article>
           <h3>Validation vs Compliance</h3>
           <p>Validation is PASS or FAIL. Compliance is OK or WARN. Warnings do not invalidate the calculation.</p>
+        </article>
+
+        <article className="helpFormulaReference">
+          <h3>Supported Formulas</h3>
+          <p>Quoin supports an Excel-compatible subset for common calculator logic. Unsupported imported formulas stay visible and appear as review items instead of being silently dropped.</p>
+          <ul>
+            <li><code>=A1+B1</code> uses coordinate references.</li>
+            <li><code>=design_span * design_plf</code> uses Smart Cell names.</li>
+            <li><code>=SUM(A1:A5)</code> and <code>=SUM(A1:B3)</code> use ranges.</li>
+            <li><code>=IF(A1&gt;10, "review", "ok")</code> uses conditional logic.</li>
+            <li><code>=IF(design_span&gt;14, "review", recommended_beam)</code> combines Smart Cell names and IF.</li>
+          </ul>
+          <p>Supported aliases include SUM, AVERAGE, MAX, MIN, ROUND, ABS, SQRT, CEIL, and FLOOR.</p>
         </article>
 
         <article>
@@ -2542,6 +2490,27 @@ function buildDisplayValues(
   }
 
   return display;
+}
+
+function buildColumnWidths(
+  cells: Record<string, GridCell>,
+  displayValues: Record<string, CellValue>,
+  columns: string[],
+  rowCount: number,
+): number[] {
+  return columns.map((column) => {
+    let maxLength = column.length;
+
+    for (let row = 1; row <= rowCount; row += 1) {
+      const address = `${column}${row}`;
+      const cell = getCell(cells, address);
+      const visibleValue = formatCellValue(displayValues[address] ?? null);
+      const marker = cell.name ? cell.name.length + 2 : 0;
+      maxLength = Math.max(maxLength, visibleValue.length, marker);
+    }
+
+    return Math.min(420, Math.max(116, maxLength * 8 + 32));
+  });
 }
 
 function buildReferenceOptions(cells: Record<string, GridCell>, displayValues: Record<string, CellValue>, columns: string[], rowCount: number) {
