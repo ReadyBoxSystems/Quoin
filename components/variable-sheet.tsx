@@ -1187,6 +1187,7 @@ export function VariableSheet() {
                       selectedAddress={selectedAddress}
                       setDraftEntry={setDraftEntry}
                       startEditing={startEditing}
+                      updateCell={updateCell}
                     />
                   );
                 })}
@@ -1685,7 +1686,7 @@ function HelpPanel() {
 
         <article>
           <h3>Smart Cells</h3>
-          <p>Name a cell to promote it. The Smart Cell Name stays formula-safe, while Display Label controls the human-facing runner text.</p>
+          <p>Name a cell to promote it. Smart Cell names are workbook-scoped, so formulas on any Sheet can reference them directly.</p>
         </article>
 
         <article>
@@ -1709,6 +1710,7 @@ function HelpPanel() {
           <ul>
             <li><code>=A1+B1</code> uses coordinate references.</li>
             <li><code>=design_span * design_plf</code> uses Smart Cell names.</li>
+            <li><code>=design_span * 650</code> can reference <code>design_span</code> from another Sheet.</li>
             <li><code>=SUM(A1:A5)</code> and <code>=SUM(A1:B3)</code> use ranges.</li>
             <li><code>=IF(A1&gt;10, "review", "ok")</code> uses conditional logic.</li>
             <li><code>=IF(design_span&gt;14, "review", recommended_beam)</code> combines Smart Cell names and IF.</li>
@@ -1746,6 +1748,7 @@ function Row({
   selectedAddress,
   setDraftEntry,
   startEditing,
+  updateCell,
 }: {
   columns: string[];
   cells: Record<string, GridCell>;
@@ -1762,6 +1765,7 @@ function Row({
   selectedAddress: string;
   setDraftEntry: (value: string) => void;
   startEditing: (address: string, replacement?: string) => void;
+  updateCell: (address: string, patch: Partial<GridCell>) => void;
 }) {
   return (
     <>
@@ -1772,9 +1776,14 @@ function Row({
         const selected = selectedAddress === address;
         const editing = editingAddress === address;
         const issues = issueMap.get(address) ?? [];
+        const hasDropdown = Boolean(cell.name && cell.inputOptions.length > 0);
+        const dropdownOptions = hasDropdown && cell.entry && !cell.inputOptions.includes(cell.entry)
+          ? [cell.entry, ...cell.inputOptions]
+          : cell.inputOptions;
         return (
           <div
             className="gridCell"
+            data-dropdown={hasDropdown}
             data-editing={editing}
             data-issue={issues.length > 0}
             data-role={cell.name ? cell.role : "normal"}
@@ -1797,6 +1806,21 @@ function Row({
                 value={draftEntry}
                 onChange={(event) => setDraftEntry(event.target.value)}
               />
+            ) : hasDropdown ? (
+              <select
+                aria-label={`${address} dropdown`}
+                className="gridDropdown"
+                value={cell.entry}
+                onClick={(event) => event.stopPropagation()}
+                onFocus={() => handleCellClick(address)}
+                onKeyDown={(event) => event.stopPropagation()}
+                onChange={(event) => updateCell(address, { entry: event.target.value })}
+              >
+                {!cell.entry && <option value="">Choose...</option>}
+                {dropdownOptions.map((option) => (
+                  <option key={option} value={option}>{prettifyName(option)}</option>
+                ))}
+              </select>
             ) : (
               <span className="cellDisplay">{formatCellValue(displayValues[address] ?? null)}</span>
             )}

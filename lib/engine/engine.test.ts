@@ -301,6 +301,32 @@ test("evaluates workbook cross-sheet coordinate references", () => {
   assertEq(result.sheetResults[1].result.outputs.total_load, 9100, "sheet result should expose local output");
 });
 
+test("evaluates workbook-scoped Smart Cell names across sheets", () => {
+  const result = executeWorkbookEngine({
+    sheets: [
+      {
+        id: "inputs",
+        name: "Inputs",
+        cells: [
+          cell({ id: "B2", address: "B2", name: "design_span", role: "input", value: 14, surfaced: true }),
+          cell({ id: "B3", address: "B3", name: "design_plf", role: "input", value: 650, surfaced: true }),
+        ],
+      },
+      {
+        id: "calculator",
+        name: "Calculator",
+        cells: [
+          cell({ id: "B2", address: "B2", name: "total_load", role: "output", formula: "design_span * design_plf", surfaced: true }),
+        ],
+      },
+    ],
+  });
+
+  assertEq(result.valid, true, "workbook-scoped name formula should be valid");
+  assertEq(result.outputs["Calculator!total_load"], 9100, "cross-sheet Smart Cell name formula should evaluate");
+  assertEq(result.sheetResults[1].result.outputs.total_load, 9100, "sheet result should expose local named output");
+});
+
 test("evaluates quoted sheet names with spaces", () => {
   const result = executeWorkbookEngine({
     sheets: [

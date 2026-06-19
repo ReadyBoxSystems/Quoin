@@ -496,6 +496,10 @@ h1 {
   background: #f6fffb;
 }
 
+.gridCell[data-dropdown="true"] {
+  padding: 0 !important;
+}
+
 .gridCell input {
   background: transparent;
   border: 0;
@@ -506,6 +510,24 @@ h1 {
   outline: none;
   padding: 7px 8px;
   width: 100%;
+}
+
+.gridDropdown {
+  appearance: auto;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  height: 100%;
+  min-height: 33px;
+  outline: none;
+  padding: 7px 28px 7px 8px;
+  width: 100%;
+}
+
+.gridDropdown:focus {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .gridCell:focus {
@@ -537,6 +559,11 @@ h1 {
   position: absolute;
   right: 3px;
   text-overflow: ellipsis;
+}
+
+.gridCell[data-dropdown="true"] .smartMarker {
+  max-width: calc(100% - 34px);
+  right: 22px;
 }
 
 .roleBadge {
