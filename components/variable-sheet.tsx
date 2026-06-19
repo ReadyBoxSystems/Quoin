@@ -1153,6 +1153,13 @@ export function VariableSheet() {
             )}
           </div>
 
+          <SheetStrip
+            activeSheetId={activeSheetId}
+            addSheet={addSheet}
+            sheets={visibleSheets}
+            switchSheet={switchSheet}
+          />
+
           <div className="authoringLayout">
             <section className="spreadsheetFrame" aria-label="Quoin spreadsheet grid">
               <div
@@ -1193,13 +1200,6 @@ export function VariableSheet() {
                 })}
               </div>
             </section>
-
-            <SheetStrip
-              activeSheetId={activeSheetId}
-              addSheet={addSheet}
-              sheets={visibleSheets}
-              switchSheet={switchSheet}
-            />
 
             <Inspector
               clearCell={clearCell}

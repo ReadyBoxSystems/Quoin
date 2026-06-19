@@ -333,19 +333,18 @@ h1 {
   align-items: start;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px) minmax(330px, 380px);
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 380px);
 }
 
 .sheetStrip {
+  align-items: center;
   background: var(--sheet);
   border: 1px solid var(--line-strong);
-  display: grid;
+  display: flex;
   gap: 8px;
-  max-width: 260px;
+  margin-bottom: 10px;
   min-width: 0;
   padding: 8px;
-  position: sticky;
-  top: 12px;
 }
 
 .sheetStripHeader {
@@ -357,10 +356,10 @@ h1 {
 }
 
 .sheetStripList {
-  display: grid;
+  display: flex;
   gap: 6px;
-  max-height: 55vh;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .sheetStrip button {
@@ -369,13 +368,13 @@ h1 {
   min-height: 34px;
   padding: 6px 7px;
   text-align: left;
-  width: 100%;
 }
 
 .sheetStripList button {
   align-items: start;
   display: grid;
   gap: 2px;
+  min-width: 140px;
 }
 
 .sheetStripList button[data-active="true"] {
@@ -404,6 +403,7 @@ h1 {
 
 .sheetAddButton {
   color: var(--muted);
+  flex: 0 0 auto;
   font-size: 12px;
 }
 
