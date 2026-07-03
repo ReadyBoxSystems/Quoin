@@ -1,10 +1,16 @@
 import ExcelJS from "exceljs/dist/exceljs.min.js";
 import type { Cell, CellValue, Worksheet } from "exceljs";
-import type { ImportedCell, ImportedCellValue, ImportedMerge, ImportedName, ImportedNameKind, ImportedWorkbook, ImportReviewItem } from "./types";
+import type { ImportedCell, ImportedCellValue, ImportedDataValidation, ImportedMerge, ImportedName, ImportedNameKind, ImportedWorkbook, ImportReviewItem } from "./types";
 
 interface DefinedNameRange {
   name: string;
   ranges: string[];
+}
+
+interface WorkbookReadContext {
+  names: ImportedName[];
+  worksheets: Worksheet[];
+  reviewItems: ImportReviewItem[];
 }
 
 export async function readExcelWorkbook(fileName: string, data: ArrayBuffer): Promise<ImportedWorkbook> {
@@ -13,7 +19,8 @@ export async function readExcelWorkbook(fileName: string, data: ArrayBuffer): Pr
 
   const reviewItems: ImportReviewItem[] = [];
   const names = readDefinedNames(workbook.definedNames.model);
-  const sheets = workbook.worksheets.map((worksheet) => readWorksheet(worksheet, reviewItems));
+  const context = { names, worksheets: workbook.worksheets, reviewItems };
+  const sheets = workbook.worksheets.map((worksheet) => readWorksheet(worksheet, context));
 
   return {
     fileName,
@@ -23,9 +30,10 @@ export async function readExcelWorkbook(fileName: string, data: ArrayBuffer): Pr
   };
 }
 
-function readWorksheet(worksheet: Worksheet, reviewItems: ImportReviewItem[]) {
+function readWorksheet(worksheet: Worksheet, context: WorkbookReadContext) {
   const cells: ImportedCell[] = [];
   const merges = readMergedRanges(worksheet);
+  const dataValidations = readDataValidations(worksheet, context);
   const mergedCoveredCells = new Set(merges.flatMap((merge) => addressesInRange(merge.range).filter((address) => address !== merge.topLeft)));
   let maxRow = 0;
   let maxColumn = 0;
@@ -36,7 +44,7 @@ function readWorksheet(worksheet: Worksheet, reviewItems: ImportReviewItem[]) {
       maxRow = Math.max(maxRow, bottomRight.row);
       maxColumn = Math.max(maxColumn, bottomRight.column);
     }
-    reviewItems.push({
+    context.reviewItems.push({
       severity: "info",
       sheetName: worksheet.name,
       address: merge.topLeft,
@@ -49,10 +57,17 @@ function readWorksheet(worksheet: Worksheet, reviewItems: ImportReviewItem[]) {
     row.eachCell((cell, columnNumber) => {
       maxColumn = Math.max(maxColumn, columnNumber);
       if (mergedCoveredCells.has(cell.address.toUpperCase())) return;
-      const importedCell = readCell(cell, worksheet.name, reviewItems);
+      const importedCell = readCell(cell, worksheet.name, context.reviewItems);
       if (importedCell.kind !== "blank") cells.push(importedCell);
     });
   });
+
+  for (const validation of dataValidations) {
+    const parsed = parseCellAddress(validation.address);
+    if (!parsed) continue;
+    maxRow = Math.max(maxRow, parsed.row);
+    maxColumn = Math.max(maxColumn, parsed.column);
+  }
 
   return {
     id: String(worksheet.id),
@@ -63,7 +78,126 @@ function readWorksheet(worksheet: Worksheet, reviewItems: ImportReviewItem[]) {
     },
     cells,
     merges,
+    dataValidations,
   };
+}
+
+function readDataValidations(worksheet: Worksheet, context: WorkbookReadContext): ImportedDataValidation[] {
+  const worksheetWithValidations = worksheet as Worksheet & {
+    dataValidations?: { model?: Record<string, { type?: string; formulae?: unknown[] }> };
+  };
+  const model = worksheetWithValidations.dataValidations?.model;
+  if (!model || typeof model !== "object") return [];
+
+  const validations: ImportedDataValidation[] = [];
+
+  for (const [target, validation] of Object.entries(model)) {
+    if (validation?.type !== "list") continue;
+    const formula = validation.formulae?.[0];
+    const source = typeof formula === "string" ? formula.trim() : formula === undefined || formula === null ? "" : String(formula);
+    const options = optionsFromLiteralListFormula(source) ?? optionsFromWorkbookSource(source, worksheet.name, context);
+
+    for (const address of addressesForValidationTarget(target)) {
+      validations.push({
+        address,
+        type: "list",
+        ...(options ? { options } : { source }),
+      });
+    }
+  }
+
+  return validations;
+}
+
+function addressesForValidationTarget(target: string): string[] {
+  const normalizedTarget = target.replace(/\$/g, "").toUpperCase();
+  if (normalizedTarget.includes(":")) return addressesInRange(normalizedTarget);
+  const address = normalizeAddress(normalizedTarget);
+  return address ? [address] : [];
+}
+
+function optionsFromLiteralListFormula(formula: string): string[] | null {
+  const trimmed = formula.trim().replace(/^=/, "").trim();
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) return null;
+
+  const literal = trimmed.slice(1, -1).replace(/""/g, '"');
+  const options = literal
+    .split(",")
+    .map((option) => option.trim())
+    .filter(Boolean);
+
+  return options.length > 0 ? options : null;
+}
+
+function optionsFromWorkbookSource(source: string, currentSheetName: string, context: WorkbookReadContext): string[] | null {
+  const sourceRange = rangeFromValidationSource(source, currentSheetName, context.names);
+  if (!sourceRange) return null;
+
+  const sourceWorksheet = context.worksheets.find((worksheet) => worksheet.name === sourceRange.sheetName);
+  if (!sourceWorksheet) return null;
+
+  const options: string[] = [];
+  const seen = new Set<string>();
+
+  for (const address of addressesInRange(sourceRange.range)) {
+    const cell = sourceWorksheet.getCell(address);
+    const value = dropdownOptionValueFromCellValue(cell.value, sourceWorksheet.name, address, context.reviewItems);
+    if (value === null) continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    options.push(value);
+  }
+
+  return options.length > 0 ? options : null;
+}
+
+function rangeFromValidationSource(
+  source: string,
+  currentSheetName: string,
+  names: ImportedName[],
+): { sheetName: string; range: string } | null {
+  const trimmed = source.trim().replace(/^=/, "").trim();
+  if (!trimmed) return null;
+  if (trimmed.includes("[") || trimmed.includes("]")) return null;
+  if (trimmed.includes(",") || trimmed.includes(";")) return null;
+
+  const directRange = sheetRangeFromReference(trimmed, currentSheetName);
+  if (directRange) return directRange;
+
+  const nameMatches = names.filter((name) => name.name.toLowerCase() === trimmed.toLowerCase());
+  if (nameMatches.length !== 1 || nameMatches[0].kind !== "range") return null;
+
+  return sheetRangeFromReference(nameMatches[0].reference, nameMatches[0].sheetName ?? currentSheetName);
+}
+
+function sheetRangeFromReference(reference: string, currentSheetName: string): { sheetName: string; range: string } | null {
+  const bangIndex = reference.lastIndexOf("!");
+  const sheetName = bangIndex === -1 ? currentSheetName : unquoteSheetName(reference.slice(0, bangIndex));
+  const rawRange = bangIndex === -1 ? reference : reference.slice(bangIndex + 1);
+  const parsed = parseRange(rawRange);
+  return parsed ? { sheetName, range: parsed.range } : null;
+}
+
+function unquoteSheetName(sheetName: string): string {
+  const trimmed = sheetName.trim();
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replace(/''/g, "'");
+  }
+  return trimmed;
+}
+
+function dropdownOptionValueFromCellValue(
+  value: CellValue,
+  sheetName: string,
+  address: string,
+  reviewItems: ImportReviewItem[],
+): string | null {
+  const formulaResult = importedValueFromFormulaResult(value, sheetName, address, reviewItems);
+  const importedValue = formulaResult ?? importedValueFromCellValue(value, sheetName, address, reviewItems);
+  if (importedValue === undefined || importedValue === null) return null;
+  if (importedValue instanceof Date) return importedValue.toISOString().slice(0, 10);
+  const option = String(importedValue);
+  return option.trim() === "" ? null : option;
 }
 
 function readMergedRanges(worksheet: Worksheet): ImportedMerge[] {

@@ -1,6 +1,6 @@
 import type { SmartCellType } from "@/lib/engine";
 import type { GridCell } from "@/lib/sheet/types";
-import type { ImportedCell, ImportedCellValue, ImportedName, ImportedSheet, ImportReviewItem } from "./types";
+import type { ImportedCell, ImportedCellValue, ImportedDataValidation, ImportedName, ImportedSheet, ImportReviewItem } from "./types";
 
 const defaultImportedColumnCount = 8;
 const defaultImportedRowCount = 18;
@@ -51,6 +51,13 @@ export function convertImportedSheetToQuoin(sheet: ImportedSheet, options: Conve
     reviewImportedFormula(importedCell, sheet.name, address, reviewItems);
   }
 
+  applyImportedDataValidations({
+    cells,
+    dataValidations: sheet.dataValidations ?? [],
+    sheetName: sheet.name,
+    reviewItems,
+  });
+
   const promotedNameCount = applyImportedNames({
     cells,
     names: options.names ?? [],
@@ -65,6 +72,44 @@ export function convertImportedSheetToQuoin(sheet: ImportedSheet, options: Conve
     reviewItems,
     promotedNameCount,
   };
+}
+
+function applyImportedDataValidations(input: {
+  cells: Record<string, GridCell>;
+  dataValidations: ImportedDataValidation[];
+  sheetName: string;
+  reviewItems: ImportReviewItem[];
+}) {
+  for (const validation of input.dataValidations) {
+    const address = normalizeCellAddress(validation.address);
+    if (!address) {
+      input.reviewItems.push({
+        severity: "warning",
+        sheetName: input.sheetName,
+        address: validation.address,
+        message: `Skipped imported dropdown with unsupported address "${validation.address}".`,
+      });
+      continue;
+    }
+
+    if (!validation.options?.length) {
+      input.reviewItems.push({
+        severity: "info",
+        sheetName: input.sheetName,
+        address,
+        message: `Excel dropdown at ${address} uses an unsupported source${validation.source ? ` (${validation.source})` : ""}. Quoin preserved the cell but needs future reference-data-backed dropdown support for this source.`,
+      });
+      continue;
+    }
+
+    const existingCell = input.cells[address] ?? makeEmptyGridCell(address);
+    input.cells[address] = {
+      ...existingCell,
+      role: existingCell.entry.trim().startsWith("=") ? existingCell.role : "input",
+      type: existingCell.type === "number" || existingCell.type === "boolean" ? existingCell.type : "text",
+      inputOptions: validation.options,
+    };
+  }
 }
 
 function reviewImportedFormula(

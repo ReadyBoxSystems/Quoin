@@ -17,6 +17,13 @@ export interface ImportedMerge {
   bottomRight: string;
 }
 
+export interface ImportedDataValidation {
+  address: string;
+  type: "list";
+  options?: string[];
+  source?: string;
+}
+
 export interface ImportedSheetDimensions {
   rowCount: number;
   columnCount: number;
@@ -28,6 +35,7 @@ export interface ImportedSheet {
   dimensions: ImportedSheetDimensions;
   cells: ImportedCell[];
   merges?: ImportedMerge[];
+  dataValidations?: ImportedDataValidation[];
 }
 
 export type ImportedNameKind = "singleCell" | "range" | "formula" | "external" | "unknown";

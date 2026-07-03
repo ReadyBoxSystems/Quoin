@@ -17,8 +17,8 @@ import type { GridCell, LocalConfiguration, LookupConfig, SheetSnapshot, Workboo
 const STORAGE_KEY = "quoin.gridSheet.v2";
 const CONFIG_STORAGE_KEY = "quoin.configurations.v1";
 const ACTIVE_CONFIG_KEY = "quoin.activeConfiguration.v1";
-const defaultColumnCount = 8;
-const defaultRowCount = 18;
+const defaultColumnCount = 16;
+const defaultRowCount = 30;
 const historyLimit = 50;
 const roleOptions: SmartCellRole[] = ["input", "formula", "output", "action", "lookup", "validation", "compliance"];
 const typeOptions: SmartCellType[] = ["number", "text", "boolean"];
@@ -281,8 +281,8 @@ export function VariableSheet() {
       setSheets(activeConfig.sheets ?? [sheetFromConfiguration(activeConfig)]);
       setActiveSheetId(activeConfig.activeSheetId ?? activeConfig.sheets?.[0]?.id ?? "");
       setCells(activeConfig.cells);
-      setColumnCount(activeConfig.columnCount ?? defaultColumnCount);
-      setRowCount(activeConfig.rowCount ?? defaultRowCount);
+      setColumnCount(Math.max(activeConfig.columnCount ?? defaultColumnCount, defaultColumnCount));
+      setRowCount(Math.max(activeConfig.rowCount ?? defaultRowCount, defaultRowCount));
       setUndoStack([]);
       setRedoStack([]);
       setIsDirty(false);
@@ -500,6 +500,19 @@ export function VariableSheet() {
     if (nextAddress) setSelectedAddress(nextAddress);
   }
 
+  function handleCellMouseDown(event: React.MouseEvent<HTMLDivElement>, address: string) {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("input, select, textarea")) return;
+
+    if (editingAddress && editingAddress !== address) {
+      commitEditing(address);
+      return;
+    }
+
+    setSelectedAddress(address);
+  }
+
   function cancelEditing() {
     setEditingAddress(null);
     setDraftEntry("");
@@ -598,12 +611,6 @@ export function VariableSheet() {
   }
 
   function handleCellClick(address: string) {
-    if (editingAddress && editingAddress !== address && draftEntry.trim().startsWith("=")) {
-      const target = getCell(cells, address);
-      const reference = target.name || address;
-      setDraftEntry((current) => `${current}${current.endsWith("=") || current.endsWith(" ") ? "" : " "}${reference}`);
-      return;
-    }
     setSelectedAddress(address);
   }
 
@@ -1165,8 +1172,8 @@ export function VariableSheet() {
               <div
                 className="spreadsheetGrid"
                 style={{
-                  gridTemplateColumns: `44px ${columnWidths.map((width) => `minmax(${width}px, 1fr)`).join(" ")}`,
-                  minWidth: 44 + columnWidths.reduce((total, width) => total + width, 0),
+                  gridTemplateColumns: `36px ${columnWidths.map((width) => `${width}px`).join(" ")}`,
+                  minWidth: 36 + columnWidths.reduce((total, width) => total + width, 0),
                 }}
               >
                 <div className="sheetCorner" />
@@ -1177,15 +1184,17 @@ export function VariableSheet() {
                 {Array.from({ length: rowCount }, (_, rowIndex) => {
                   const rowNumber = rowIndex + 1;
                   return (
-                <Row
-                  columns={columns}
-                  cells={cells}
-                  cellRefs={cellRefs}
-                  displayValues={displayValues}
+                    <Row
+                      columns={columns}
+                      cells={cells}
+                      cellRefs={cellRefs}
+                      commitEditing={commitEditing}
+                      displayValues={displayValues}
                       draftEntry={draftEntry}
                       editInputRef={editInputRef}
                       editingAddress={editingAddress}
                       handleCellClick={handleCellClick}
+                      handleCellMouseDown={handleCellMouseDown}
                       handleGridKeyDown={handleGridKeyDown}
                       handleGridPaste={handleGridPaste}
                       issueMap={issueMap}
@@ -1417,9 +1426,10 @@ function Inspector({
               <textarea
                 value={selectedCell.inputOptions.join("\n")}
                 onChange={(event) => updateCell(selectedAddress, { inputOptions: splitInputOptions(event.target.value) })}
-                placeholder="One option per line. Leave blank for free text."
+                placeholder="One short option per line, or comma-separated. Leave blank for free text."
                 rows={3}
               />
+              <span>Use embedded options for short lists. Longer lists should come from visible reference data in a later reference-table workflow.</span>
             </label>
           )}
 
@@ -1671,61 +1681,200 @@ function HelpPanel() {
       <div className="helpHeader">
         <p className="eyebrow">Help</p>
         <h2>How Quoin Works</h2>
+        <p>Quoin is a spreadsheet-first prototype for turning shop knowledge into structured, runner-safe workflows. Start by building normal spreadsheet logic, then name important cells when they need meaning, controls, or runner visibility.</p>
       </div>
 
       <div className="helpGrid">
         <article>
-          <h3>What Quoin Is</h3>
-          <p>Quoin starts as a normal spreadsheet, then lets important cells become structured Smart Cells for controlled runner workflows.</p>
+          <h3>Core Idea</h3>
+          <p>Quoin should feel familiar to anyone who has used Excel: cells have coordinates, formulas can reference other cells, and imported workbooks keep their sheet structure. The difference is that named cells can carry metadata and can be surfaced into Runner Preview.</p>
         </article>
 
         <article>
           <h3>Normal Cells</h3>
-          <p>Normal cells use coordinates like B2. They can hold values or formulas, but they do not appear in Runner Preview.</p>
+          <p>Normal cells use addresses like <code>A1</code> or <code>B12</code>. They can hold labels, numbers, text, booleans, or formulas. They stay in the authoring grid only and do not appear in Runner Preview.</p>
+          <ul>
+            <li>Type directly in a selected cell, double-click a cell, press Enter, or use the formula bar.</li>
+            <li>Use Delete or Backspace to clear the selected cell.</li>
+            <li>Paste tabular data from Excel into the grid.</li>
+          </ul>
         </article>
 
         <article>
           <h3>Smart Cells</h3>
-          <p>Name a cell to promote it. Smart Cell names are workbook-scoped, so formulas on any Sheet can reference them directly.</p>
+          <p>A cell becomes a Smart Cell when you give it a Smart Cell Name in the inspector. Names are formula-safe identifiers such as <code>design_span</code>, while Display Label is the human-facing text such as <code>Design Span (ft)</code>.</p>
+          <ul>
+            <li>Smart Cell names are workbook-scoped when unique.</li>
+            <li>Formulas on any Sheet can reference a unique Smart Cell name directly.</li>
+            <li>Metadata stays in the inspector so the grid remains spreadsheet-first.</li>
+          </ul>
         </article>
 
         <article>
-          <h3>Runner Preview</h3>
-          <p>Surfaced Smart Cells become runner inputs, recommendations, shop actions, validation checks, and review flags.</p>
+          <h3>Basic Workflow</h3>
+          <ol>
+            <li>Build the calculator in the grid with normal values and formulas.</li>
+            <li>Verify the math works in the Sheet view.</li>
+            <li>Name important cells to promote them to Smart Cells.</li>
+            <li>Set role, type, display label, annotation, dropdown options, or rule text in the inspector.</li>
+            <li>Turn on Surface in Runner Preview for the cells the runner should see.</li>
+            <li>Use Runner Preview to test the controlled form.</li>
+          </ol>
         </article>
 
         <article>
           <h3>Roles</h3>
-          <p>Use input, formula, output, lookup, action, validation, and compliance roles to describe what each Smart Cell does.</p>
+          <p>Roles describe how a Smart Cell behaves and how it should be grouped for the runner.</p>
+          <ul>
+            <li><code>input</code>: a value supplied by an admin or runner.</li>
+            <li><code>formula</code>: internal calculated logic.</li>
+            <li><code>output</code>: a calculated or entered result.</li>
+            <li><code>lookup</code>: a value resolved from a lookup table.</li>
+            <li><code>action</code>: a runner-facing shop note or required action.</li>
+            <li><code>validation</code>: PASS or FAIL rule result.</li>
+            <li><code>compliance</code>: OK or WARN review result.</li>
+          </ul>
         </article>
 
         <article>
-          <h3>Validation vs Compliance</h3>
-          <p>Validation is PASS or FAIL. Compliance is OK or WARN. Warnings do not invalidate the calculation.</p>
+          <h3>Inputs And Dropdowns</h3>
+          <p>Input Smart Cells can use free text or a controlled dropdown list. Add short embedded dropdown choices in the inspector with one option per line or comma-separated values.</p>
+          <ul>
+            <li>Dropdowns render directly in the grid.</li>
+            <li>The same dropdown options render in Runner Preview.</li>
+            <li>Use Display Label to make runner fields readable without changing formula names.</li>
+            <li>Imported Excel cells with simple typed lists or same-workbook range lists are snapshotted into embedded dropdown options.</li>
+            <li>Longer option sets should eventually use live visible reference data, named ranges, tables, or CSV-ingested datasets.</li>
+          </ul>
         </article>
 
         <article className="helpFormulaReference">
           <h3>Supported Formulas</h3>
-          <p>Quoin supports an Excel-compatible subset for common calculator logic. Unsupported imported formulas stay visible and appear as review items instead of being silently dropped.</p>
+          <p>Quoin supports an Excel-compatible subset for common calculator logic. A formula starts with <code>=</code>. The engine evaluates references, ranges, arithmetic, comparisons, common functions, and <code>IF</code>. Unsupported imported formulas stay visible and appear as review items instead of being silently dropped.</p>
+          <h4>References</h4>
+          <p>A reference points a formula at another cell or Smart Cell. Coordinate references use the grid address. Smart Cell references use the workbook-scoped Smart Cell Name.</p>
           <ul>
             <li><code>=A1+B1</code> uses coordinate references.</li>
+            <li><code>=B2 * 650</code> multiplies the value in <code>B2</code> by a constant.</li>
             <li><code>=design_span * design_plf</code> uses Smart Cell names.</li>
             <li><code>=design_span * 650</code> can reference <code>design_span</code> from another Sheet.</li>
+          </ul>
+          <h4>Cross-Sheet References</h4>
+          <p>Use cross-Sheet references when a formula should point at a coordinate on another Sheet. Sheet names with spaces need single quotes.</p>
+          <ul>
+            <li><code>=Inputs!B2 * Inputs!B3</code> references cells on a Sheet named <code>Inputs</code>.</li>
+            <li><code>='Input Data'!B2 * 3</code> references a Sheet whose name contains a space.</li>
+            <li><code>=design_span * design_plf</code> is usually cleaner when those inputs have unique Smart Cell names.</li>
+          </ul>
+          <h4>Ranges</h4>
+          <p>A range is a group of cells between two addresses. Quoin supports single-column, single-row, and rectangular ranges for common aggregate formulas.</p>
+          <ul>
             <li><code>=SUM(A1:A5)</code> and <code>=SUM(A1:B3)</code> use ranges.</li>
+            <li><code>=AVERAGE(B2:B10)</code> averages a vertical range.</li>
+            <li><code>=MAX(A1:D1)</code> finds the largest value across a row.</li>
+            <li><code>=SUM(Loads!B3:B5)</code> can aggregate a supported range from another Sheet.</li>
+          </ul>
+          <h4>Functions</h4>
+          <p>Functions perform named operations. Quoin accepts familiar uppercase Excel-style names and maps them to deterministic engine behavior.</p>
+          <ul>
+            <li><code>=SUM(A1:A5)</code> adds values.</li>
+            <li><code>=AVERAGE(A1:A5)</code> calculates the mean.</li>
+            <li><code>=MIN(A1:A5)</code> and <code>=MAX(A1:A5)</code> find bounds.</li>
+            <li><code>=ROUND(B6, 2)</code> rounds to two decimal places.</li>
+            <li><code>=ABS(B2)</code>, <code>=SQRT(B2)</code>, <code>=CEIL(B2)</code>, and <code>=FLOOR(B2)</code> cover common numeric cleanup.</li>
+          </ul>
+          <h4>Conditions And IF</h4>
+          <p>Comparisons return true or false. <code>IF</code> chooses one value when the condition is true and another value when it is false.</p>
+          <ul>
+            <li><code>=design_span &gt; 14</code> returns a boolean result.</li>
             <li><code>=IF(A1&gt;10, "review", "ok")</code> uses conditional logic.</li>
             <li><code>=IF(design_span&gt;14, "review", recommended_beam)</code> combines Smart Cell names and IF.</li>
+            <li><code>=IF(total_line_load&gt;9000, "engineering review", "standard")</code> returns runner-readable text.</li>
           </ul>
           <p>Supported aliases include SUM, AVERAGE, MAX, MIN, ROUND, ABS, SQRT, CEIL, and FLOOR.</p>
+          <h4>Formula Editing Notes</h4>
+          <ul>
+            <li>While typing a formula, the reference popup suggests named Smart Cells and populated coordinates.</li>
+            <li>Copy, paste, and fill-down adjust coordinate references while leaving Smart Cell names unchanged.</li>
+            <li>Deleted row or column references become <code>#REF!</code> so broken formulas remain visible.</li>
+            <li>Incomplete formulas should not crash the app while you are still typing.</li>
+          </ul>
+        </article>
+
+        <article>
+          <h3>Sheets</h3>
+          <p>A configuration can contain multiple Sheets. Sheet tabs sit below the formula bar and above the grid. The authoring grid shows one active Sheet at a time, while Runner Preview can gather surfaced Smart Cells from the whole workbook.</p>
+          <ul>
+            <li>Use coordinate formulas on the current Sheet, such as <code>=A1+B1</code>.</li>
+            <li>Use supported cross-Sheet references, such as <code>=Inputs!B2 * Inputs!B3</code>.</li>
+            <li>Use unique Smart Cell names across Sheets, such as <code>=design_span * design_plf</code>.</li>
+          </ul>
+        </article>
+
+        <article>
+          <h3>Runner Preview</h3>
+          <p>Runner Preview is generated from surfaced Smart Cells. It hides normal coordinate cells and empty optional sections, then groups surfaced inputs, outputs, actions, review flags, and validation by Sheet when needed.</p>
+          <ul>
+            <li>Inputs become editable runner fields.</li>
+            <li>Outputs show calculated results.</li>
+            <li>Action cells show shop notes or required actions.</li>
+            <li>Validation cells show PASS or FAIL.</li>
+            <li>Compliance cells show OK or WARN.</li>
+          </ul>
+        </article>
+
+        <article>
+          <h3>Validation vs Compliance</h3>
+          <p>Validation and compliance are intentionally different. Validation is for run failure; compliance is for warning the runner. Math should still run where possible.</p>
+          <ul>
+            <li>Validation true means PASS. Validation false means FAIL.</li>
+            <li>Compliance false means OK. Compliance true means WARN.</li>
+            <li>Rule Message is the runner-facing explanation for a FAIL or WARN.</li>
+          </ul>
+        </article>
+
+        <article>
+          <h3>Lookup Cells</h3>
+          <p>Lookup Smart Cells can match one or more input criteria against the embedded lookup table editor. The current editor is a prototype shortcut; the longer-term product direction is first-class reference tables or CSV-ingested datasets.</p>
+          <ul>
+            <li>Use criteria columns to match input Smart Cell names.</li>
+            <li>Choose an output column to return the lookup result.</li>
+            <li>Paste tabular data from Excel into the lookup table editor.</li>
+            <li>A lookup miss shows <code>#ERR</code> so missing data is visible.</li>
+          </ul>
+        </article>
+
+        <article>
+          <h3>Excel Import</h3>
+          <p>Import Excel brings an <code>.xlsx</code> calculator into a new browser-local configuration. The goal is to preserve the workbook calculation surface first, then let you structure it with Quoin Smart Cells.</p>
+          <ul>
+            <li>Workbook Sheets, values, and formulas are preserved.</li>
+            <li>Safe workbook-defined single-cell names can become Smart Cell names.</li>
+            <li>Simple Excel data-validation lists and supported workbook range sources can become dropdown options on imported input Smart Cells.</li>
+            <li>Merged ranges, named ranges, external workbook links, structured table references, spill markers, and other risky features appear as review items.</li>
+            <li>Unsupported formulas remain visible instead of being silently dropped.</li>
+          </ul>
         </article>
 
         <article>
           <h3>Local Configurations</h3>
-          <p>New, Save, Duplicate, and Delete manage browser-local configurations. Database-backed publishing comes later.</p>
+          <p>Configurations are stored in this browser for now. New, Save, Duplicate, Delete, rename, Load Demo, and Import Excel all operate locally. Database-backed publishing, execution records, auth, and audit reports are later phases.</p>
         </article>
 
         <article>
           <h3>Beam Demo</h3>
-          <p>The demo uses fake lookup data to show the workflow shape: enter drawing conditions, get a recommendation and shop notes.</p>
+          <p>The default <code>Demo - Beam Selection</code> configuration uses fake data only. It shows the intended flow: runner inputs for drawing conditions, calculated context, lookup recommendations, shop action notes, validation, and compliance warnings.</p>
+        </article>
+
+        <article>
+          <h3>Keyboard Shortcuts</h3>
+          <ul>
+            <li>Arrow keys move the selected cell.</li>
+            <li>Enter or F2 edits the selected cell.</li>
+            <li>Tab moves right; Shift+Tab moves left.</li>
+            <li>Ctrl+Z and Ctrl+Y undo and redo sheet edits.</li>
+            <li>Ctrl+C, Ctrl+V, and Ctrl+D support cell copy, paste, and fill-down behavior.</li>
+          </ul>
         </article>
       </div>
     </section>
@@ -1736,11 +1885,13 @@ function Row({
   columns,
   cells,
   cellRefs,
+  commitEditing,
   displayValues,
   draftEntry,
   editInputRef,
   editingAddress,
   handleCellClick,
+  handleCellMouseDown,
   handleGridKeyDown,
   handleGridPaste,
   issueMap,
@@ -1753,11 +1904,13 @@ function Row({
   columns: string[];
   cells: Record<string, GridCell>;
   cellRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
+  commitEditing: (nextAddress?: string) => void;
   displayValues: Record<string, CellValue>;
   draftEntry: string;
   editInputRef: React.RefObject<HTMLInputElement | null>;
   editingAddress: string | null;
   handleCellClick: (address: string) => void;
+  handleCellMouseDown: (event: React.MouseEvent<HTMLDivElement>, address: string) => void;
   handleGridKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, address: string) => void;
   handleGridPaste: (event: React.ClipboardEvent<HTMLDivElement>, address: string) => void;
   issueMap: Map<string, string[]>;
@@ -1793,6 +1946,7 @@ function Row({
             onClick={() => handleCellClick(address)}
             onDoubleClick={() => startEditing(address)}
             onKeyDown={(event) => handleGridKeyDown(event, address)}
+            onMouseDown={(event) => handleCellMouseDown(event, address)}
             onPaste={(event) => handleGridPaste(event, address)}
             ref={(node) => {
               cellRefs.current[address] = node;
@@ -1804,6 +1958,7 @@ function Row({
                 aria-label={address}
                 ref={editInputRef}
                 value={draftEntry}
+                onBlur={() => editingAddress === address && commitEditing()}
                 onChange={(event) => setDraftEntry(event.target.value)}
               />
             ) : hasDropdown ? (
@@ -2317,8 +2472,8 @@ function makeConfiguration(
     activeSheetId: activeSheet?.id,
     sheets: workbook?.sheets.map(hydrateWorkbookSheet),
     cells: hydrateCells(activeSheet?.cells ?? cells),
-    columnCount: activeSheet?.columnCount ?? columnCount,
-    rowCount: activeSheet?.rowCount ?? rowCount,
+    columnCount: Math.max(activeSheet?.columnCount ?? columnCount, defaultColumnCount),
+    rowCount: Math.max(activeSheet?.rowCount ?? rowCount, defaultRowCount),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -2358,8 +2513,8 @@ function makeWorkbookSheet(
     id: makeSheetId(),
     name: name.trim() || "Sheet",
     cells: hydrateCells(cells),
-    columnCount,
-    rowCount,
+    columnCount: Math.max(columnCount, defaultColumnCount),
+    rowCount: Math.max(rowCount, defaultRowCount),
   };
 }
 
@@ -2368,8 +2523,8 @@ function hydrateWorkbookSheet(sheet: WorkbookSheet): WorkbookSheet {
     id: sheet.id || makeSheetId(),
     name: sheet.name || "Sheet",
     cells: hydrateCells(sheet.cells ?? {}),
-    columnCount: sheet.columnCount ?? defaultColumnCount,
-    rowCount: sheet.rowCount ?? defaultRowCount,
+    columnCount: Math.max(sheet.columnCount ?? defaultColumnCount, defaultColumnCount),
+    rowCount: Math.max(sheet.rowCount ?? defaultRowCount, defaultRowCount),
   };
 }
 
@@ -2378,8 +2533,8 @@ function sheetFromConfiguration(configuration: LocalConfiguration): WorkbookShee
     id: configuration.activeSheetId || makeSheetId(),
     name: "Sheet 1",
     cells: hydrateCells(configuration.cells ?? {}),
-    columnCount: configuration.columnCount ?? defaultColumnCount,
-    rowCount: configuration.rowCount ?? defaultRowCount,
+    columnCount: Math.max(configuration.columnCount ?? defaultColumnCount, defaultColumnCount),
+    rowCount: Math.max(configuration.rowCount ?? defaultRowCount, defaultRowCount),
   };
 }
 
@@ -2533,7 +2688,7 @@ function buildColumnWidths(
       maxLength = Math.max(maxLength, visibleValue.length, marker);
     }
 
-    return Math.min(420, Math.max(116, maxLength * 8 + 32));
+    return Math.min(220, Math.max(64, maxLength * 6 + 18));
   });
 }
 

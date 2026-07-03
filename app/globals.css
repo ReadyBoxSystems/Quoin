@@ -409,8 +409,8 @@ h1 {
 
 .spreadsheetGrid {
   display: grid;
-  grid-template-columns: 44px repeat(8, minmax(116px, 1fr));
-  min-width: 972px;
+  grid-template-columns: 36px repeat(16, 64px);
+  min-width: 1060px;
 }
 
 .spreadsheetGrid > div {
@@ -418,9 +418,9 @@ h1 {
   border-bottom: 1px solid var(--line);
   border-right: 1px solid var(--line);
   display: flex;
-  min-height: 38px;
+  min-height: 26px;
   overflow: hidden;
-  padding: 8px;
+  padding: 4px 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -443,8 +443,8 @@ h1 {
 
 .gridCell {
   background: var(--sheet);
-  font-size: 14px;
-  min-height: 34px;
+  font-size: 12px;
+  min-height: 26px;
   padding: 0 !important;
   position: relative;
 }
@@ -506,9 +506,9 @@ h1 {
   color: inherit;
   font: inherit;
   height: 100%;
-  min-height: 33px;
+  min-height: 25px;
   outline: none;
-  padding: 7px 8px;
+  padding: 4px 6px;
   width: 100%;
 }
 
@@ -520,9 +520,9 @@ h1 {
   cursor: pointer;
   font: inherit;
   height: 100%;
-  min-height: 33px;
+  min-height: 25px;
   outline: none;
-  padding: 7px 28px 7px 8px;
+  padding: 4px 24px 4px 6px;
   width: 100%;
 }
 
@@ -536,9 +536,9 @@ h1 {
 
 .cellDisplay {
   display: block;
-  min-height: 33px;
+  min-height: 25px;
   overflow: hidden;
-  padding: 7px 8px;
+  padding: 4px 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
   width: 100%;
@@ -547,17 +547,17 @@ h1 {
 .smartMarker {
   background: rgba(31, 111, 235, 0.08);
   border: 1px solid rgba(31, 111, 235, 0.22);
-  border-radius: 3px;
-  bottom: 3px;
+  border-radius: 2px;
+  bottom: 1px;
   color: var(--accent);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   max-width: calc(100% - 8px);
   overflow: hidden;
-  padding: 1px 3px;
+  padding: 0 2px;
   pointer-events: none;
   position: absolute;
-  right: 3px;
+  right: 2px;
   text-overflow: ellipsis;
 }
 
@@ -697,6 +697,13 @@ h1 {
   font-size: 12px;
   font-weight: 700;
   gap: 6px;
+}
+
+.inspector label > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
 }
 
 .inspector input,
@@ -1206,12 +1213,21 @@ h1 {
 
 .helpHeader {
   border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
   padding-bottom: 14px;
 }
 
 .helpHeader h2 {
   font-size: 22px;
   margin: 0;
+}
+
+.helpHeader p:not(.eyebrow) {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+  max-width: 980px;
 }
 
 .helpGrid {
@@ -1224,13 +1240,18 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 4px;
   display: grid;
-  gap: 6px;
+  gap: 8px;
   padding: 12px;
 }
 
 .helpGrid h3 {
   font-size: 15px;
   margin: 0;
+}
+
+.helpGrid h4 {
+  font-size: 13px;
+  margin: 4px 0 0;
 }
 
 .helpGrid p {
@@ -1243,7 +1264,8 @@ h1 {
   grid-column: 1 / -1;
 }
 
-.helpGrid ul {
+.helpGrid ul,
+.helpGrid ol {
   color: var(--muted);
   display: grid;
   font-size: 13px;

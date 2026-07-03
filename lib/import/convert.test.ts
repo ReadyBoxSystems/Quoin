@@ -154,4 +154,33 @@ runTest("flags imported formulas that need compatibility review", () => {
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("dynamic array")).length, 1);
 });
 
+runTest("imports literal Excel dropdown lists as input options", () => {
+  const converted = convertImportedSheetToQuoin(
+    makeSheet({
+      cells: [{ address: "B2", kind: "value", value: "standard" }],
+      dataValidations: [{ address: "B2", type: "list", options: ["standard", "heavy"] }],
+    }),
+    {
+      names: [{ name: "load_band", kind: "singleCell", reference: "'Calculator'!$B$2", sheetName: "Calculator" }],
+    },
+  );
+
+  assert.equal(converted.cells.B2.name, "load_band");
+  assert.equal(converted.cells.B2.role, "input");
+  assert.deepEqual(converted.cells.B2.inputOptions, ["standard", "heavy"]);
+});
+
+runTest("reports unresolved Excel dropdown lists for later reference data binding", () => {
+  const converted = convertImportedSheetToQuoin(
+    makeSheet({
+      cells: [{ address: "B2", kind: "value", value: "standard" }],
+      dataValidations: [{ address: "B2", type: "list", source: "Table1[Band]" }],
+    }),
+  );
+
+  assert.deepEqual(converted.cells.B2.inputOptions, []);
+  assert.equal(converted.reviewItems.length, 1);
+  assert.match(converted.reviewItems[0].message, /future reference-data-backed dropdown support/);
+});
+
 console.log("All import converter tests passed");
