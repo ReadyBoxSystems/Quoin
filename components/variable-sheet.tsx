@@ -1929,7 +1929,7 @@ function Row({
         const selected = selectedAddress === address;
         const editing = editingAddress === address;
         const issues = issueMap.get(address) ?? [];
-        const hasDropdown = Boolean(cell.name && cell.inputOptions.length > 0);
+        const hasDropdown = cell.inputOptions.length > 0;
         const dropdownOptions = hasDropdown && cell.entry && !cell.inputOptions.includes(cell.entry)
           ? [cell.entry, ...cell.inputOptions]
           : cell.inputOptions;

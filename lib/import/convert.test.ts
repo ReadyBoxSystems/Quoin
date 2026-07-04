@@ -167,6 +167,25 @@ runTest("imports literal Excel dropdown lists as input options", () => {
 
   assert.equal(converted.cells.B2.name, "load_band");
   assert.equal(converted.cells.B2.role, "input");
+  assert.equal(converted.cells.B2.surfaced, true);
+  assert.deepEqual(converted.cells.B2.inputOptions, ["standard", "heavy"]);
+});
+
+runTest("promotes unnamed imported dropdown cells to surfaced Smart Cell inputs", () => {
+  const converted = convertImportedSheetToQuoin(
+    makeSheet({
+      cells: [
+        { address: "A2", kind: "value", value: "Load Band" },
+        { address: "B2", kind: "value", value: "standard" },
+      ],
+      dataValidations: [{ address: "B2", type: "list", options: ["standard", "heavy"] }],
+    }),
+  );
+
+  assert.equal(converted.cells.B2.name, "load_band");
+  assert.equal(converted.cells.B2.label, "Load Band");
+  assert.equal(converted.cells.B2.role, "input");
+  assert.equal(converted.cells.B2.surfaced, true);
   assert.deepEqual(converted.cells.B2.inputOptions, ["standard", "heavy"]);
 });
 

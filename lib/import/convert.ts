@@ -51,16 +51,16 @@ export function convertImportedSheetToQuoin(sheet: ImportedSheet, options: Conve
     reviewImportedFormula(importedCell, sheet.name, address, reviewItems);
   }
 
-  applyImportedDataValidations({
+  const promotedNameCount = applyImportedNames({
     cells,
-    dataValidations: sheet.dataValidations ?? [],
+    names: options.names ?? [],
     sheetName: sheet.name,
     reviewItems,
   });
 
-  const promotedNameCount = applyImportedNames({
+  applyImportedDataValidations({
     cells,
-    names: options.names ?? [],
+    dataValidations: sheet.dataValidations ?? [],
     sheetName: sheet.name,
     reviewItems,
   });
@@ -103,13 +103,58 @@ function applyImportedDataValidations(input: {
     }
 
     const existingCell = input.cells[address] ?? makeEmptyGridCell(address);
+    const generatedIdentity = existingCell.name
+      ? {}
+      : generatedDropdownIdentity(address, input.cells);
+
     input.cells[address] = {
       ...existingCell,
       role: existingCell.entry.trim().startsWith("=") ? existingCell.role : "input",
       type: existingCell.type === "number" || existingCell.type === "boolean" ? existingCell.type : "text",
       inputOptions: validation.options,
+      surfaced: true,
+      ...generatedIdentity,
     };
   }
+}
+
+function generatedDropdownIdentity(address: string, cells: Record<string, GridCell>): Pick<GridCell, "name" | "label"> {
+  const label = dropdownLabelForAddress(address, cells);
+  const baseName = safeNameFromLabel(label) || `dropdown_${address.toLowerCase()}`;
+  return {
+    name: uniqueSmartCellName(baseName, cells),
+    label,
+  };
+}
+
+function dropdownLabelForAddress(address: string, cells: Record<string, GridCell>): string {
+  const parsed = parseCellAddress(address);
+  const leftColumn = columnNumberToLetters(parsed.columnNumber - 1);
+  const leftAddress = leftColumn ? `${leftColumn}${parsed.rowNumber}` : "";
+  const leftEntry = leftAddress ? cells[leftAddress]?.entry.trim() : "";
+  return leftEntry || `Dropdown ${address}`;
+}
+
+function safeNameFromLabel(label: string): string {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/^([0-9])/, "_$1");
+}
+
+function uniqueSmartCellName(baseName: string, cells: Record<string, GridCell>): string {
+  const existingNames = new Set(Object.values(cells).map((cell) => cell.name).filter(Boolean));
+  let candidate = safeSmartCellNamePattern.test(baseName) && !looksLikeCellAddress(baseName) ? baseName : `dropdown_${baseName}`;
+  let suffix = 2;
+
+  while (existingNames.has(candidate)) {
+    candidate = `${baseName}_${suffix}`;
+    suffix += 1;
+  }
+
+  return candidate;
 }
 
 function reviewImportedFormula(
@@ -291,6 +336,21 @@ function columnLettersToNumber(columnLetters: string): number {
   for (const letter of columnLetters) {
     result = result * 26 + letter.charCodeAt(0) - 64;
   }
+  return result;
+}
+
+function columnNumberToLetters(columnNumber: number): string | null {
+  if (columnNumber < 1) return null;
+
+  let remaining = columnNumber;
+  let result = "";
+
+  while (remaining > 0) {
+    const modulo = (remaining - 1) % 26;
+    result = String.fromCharCode(65 + modulo) + result;
+    remaining = Math.floor((remaining - modulo) / 26);
+  }
+
   return result;
 }
 
