@@ -12,7 +12,7 @@ import {
 } from "@/lib/engine";
 import { convertImportedSheetToQuoin } from "@/lib/import/convert";
 import type { ImportedName, ImportedWorkbook, ImportReviewItem } from "@/lib/import/types";
-import type { GridCell, LocalConfiguration, LookupConfig, SheetSnapshot, WorkbookSheet } from "@/lib/sheet/types";
+import type { GridCell, InputControl, LocalConfiguration, LookupConfig, SheetSnapshot, WorkbookSheet } from "@/lib/sheet/types";
 
 const STORAGE_KEY = "quoin.gridSheet.v2";
 const CONFIG_STORAGE_KEY = "quoin.configurations.v1";
@@ -22,6 +22,7 @@ const defaultRowCount = 30;
 const historyLimit = 50;
 const roleOptions: SmartCellRole[] = ["input", "formula", "output", "action", "lookup", "validation", "compliance"];
 const typeOptions: SmartCellType[] = ["number", "text", "boolean"];
+const inputControlOptions: InputControl[] = ["freeText", "dropdown"];
 
 interface DependencyItem {
   address: string;
@@ -222,6 +223,7 @@ export function VariableSheet() {
   const [isImporting, setIsImporting] = useState(false);
   const [importMessage, setImportMessage] = useState("");
   const [importError, setImportError] = useState("");
+  const [dropdownOptionsDraft, setDropdownOptionsDraft] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const cellRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -229,6 +231,7 @@ export function VariableSheet() {
   const activeSheet = useMemo(() => sheets.find((sheet) => sheet.id === activeSheetId) ?? sheets[0] ?? null, [activeSheetId, sheets]);
   const columns = useMemo(() => makeColumns(columnCount), [columnCount]);
   const selectedCell = getCell(cells, selectedAddress);
+  const selectedDropdownOptionsText = selectedCell.inputOptions.join("\n");
   const engineCells = useMemo(() => toEngineCells(cells), [cells]);
   const result = useMemo(() => executeEngine({ cells: engineCells }), [engineCells]);
   const ruleStateMap = useMemo(() => new Map(result.ruleStates.map((rule) => [rule.address, rule.state])), [result.ruleStates]);
@@ -263,6 +266,10 @@ export function VariableSheet() {
     () => buildDependencySummary(cells, selectedAddress),
     [cells, selectedAddress],
   );
+
+  useEffect(() => {
+    setDropdownOptionsDraft(selectedDropdownOptionsText);
+  }, [selectedAddress, selectedDropdownOptionsText]);
 
   useEffect(() => {
     try {
@@ -405,6 +412,12 @@ export function VariableSheet() {
       };
     }));
     setIsDirty(true);
+  }
+
+  function commitDropdownOptions(address = selectedAddress) {
+    const options = splitInputOptions(dropdownOptionsDraft);
+    updateCell(address, { inputOptions: options });
+    setDropdownOptionsDraft(options.join("\n"));
   }
 
   function clearCell(address: string) {
@@ -1214,6 +1227,9 @@ export function VariableSheet() {
               clearCell={clearCell}
               dependencySummary={dependencySummary}
               displayValue={displayValues[selectedAddress] ?? ""}
+              dropdownOptionsDraft={dropdownOptionsDraft}
+              setDropdownOptionsDraft={setDropdownOptionsDraft}
+              commitDropdownOptions={commitDropdownOptions}
               selectedAddress={selectedAddress}
               selectedCell={selectedCell}
               selectedIssues={selectedIssues}
@@ -1285,20 +1301,26 @@ function SheetStrip({
 
 function Inspector({
   clearCell,
+  commitDropdownOptions,
   dependencySummary,
   displayValue,
+  dropdownOptionsDraft,
   selectedAddress,
   selectedCell,
   selectedIssues,
+  setDropdownOptionsDraft,
   updateCell,
   updateLookup,
 }: {
   clearCell: (address: string) => void;
+  commitDropdownOptions: (address?: string) => void;
   dependencySummary: DependencySummary;
   displayValue: CellValue;
+  dropdownOptionsDraft: string;
   selectedAddress: string;
   selectedCell: GridCell;
   selectedIssues: string[];
+  setDropdownOptionsDraft: (value: string) => void;
   updateCell: (address: string, patch: Partial<GridCell>) => void;
   updateLookup: (patch: Partial<LookupConfig>) => void;
 }) {
@@ -1386,7 +1408,7 @@ function Inspector({
               </select>
             </label>
             <label>
-              Type
+              Value Type
               <select
                 value={selectedCell.type}
                 onChange={(event) => updateCell(selectedAddress, { type: event.target.value as SmartCellType })}
@@ -1394,9 +1416,29 @@ function Inspector({
                 {typeOptions.map((type) => (
                   <option key={type} value={type}>{type}</option>
               ))}
-            </select>
-          </label>
-        </div>
+              </select>
+            </label>
+            {selectedCell.role === "input" && (
+              <label>
+                Input Control
+                <select
+                  value={selectedCell.inputControl}
+                  onChange={(event) => {
+                    const inputControl = event.target.value as InputControl;
+                    const options = inputControl === "dropdown" && selectedCell.inputOptions.length === 0 && selectedCell.entry.trim()
+                      ? [selectedCell.entry.trim()]
+                      : selectedCell.inputOptions;
+                    setDropdownOptionsDraft(options.join("\n"));
+                    updateCell(selectedAddress, { inputControl, inputOptions: inputControl === "dropdown" ? options : [] });
+                  }}
+                >
+                  {inputControlOptions.map((inputControl) => (
+                    <option key={inputControl} value={inputControl}>{inputControl === "freeText" ? "Free text" : "Dropdown"}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
 
           <div className="surfaceRow">
             <label className="checkLabel">
@@ -1420,12 +1462,13 @@ function Inspector({
             />
           </label>
 
-          {selectedCell.role === "input" && (
+          {selectedCell.role === "input" && selectedCell.inputControl === "dropdown" && (
             <label>
               Dropdown Options
               <textarea
-                value={selectedCell.inputOptions.join("\n")}
-                onChange={(event) => updateCell(selectedAddress, { inputOptions: splitInputOptions(event.target.value) })}
+                value={dropdownOptionsDraft}
+                onBlur={() => commitDropdownOptions(selectedAddress)}
+                onChange={(event) => setDropdownOptionsDraft(event.target.value)}
                 placeholder="One short option per line, or comma-separated. Leave blank for free text."
                 rows={3}
               />
@@ -1562,9 +1605,10 @@ function RunnerPreview({
                 {group.items.map((cell) => (
                   <label key={`${group.sheetId}-${cell.address}`}>
                     {labelForCell(cell)}
-                    {cell.inputOptions.length > 0 ? (
+                    {isDropdownCell(cell) ? (
                       <select value={cell.entry} onChange={(event) => updateCell(group.sheetId, cell.address, { entry: event.target.value })}>
-                        {cell.inputOptions.map((option) => (
+                        {!cell.entry && <option value="">Choose...</option>}
+                        {dropdownOptionsForCell(cell).map((option) => (
                           <option key={option} value={option}>{prettifyName(option)}</option>
                         ))}
                       </select>
@@ -1716,7 +1760,7 @@ function HelpPanel() {
             <li>Build the calculator in the grid with normal values and formulas.</li>
             <li>Verify the math works in the Sheet view.</li>
             <li>Name important cells to promote them to Smart Cells.</li>
-            <li>Set role, type, display label, annotation, dropdown options, or rule text in the inspector.</li>
+            <li>Set role, value type, input control, display label, annotation, dropdown options, or rule text in the inspector.</li>
             <li>Turn on Surface in Runner Preview for the cells the runner should see.</li>
             <li>Use Runner Preview to test the controlled form.</li>
           </ol>
@@ -1738,7 +1782,7 @@ function HelpPanel() {
 
         <article>
           <h3>Inputs And Dropdowns</h3>
-          <p>Input Smart Cells can use free text or a controlled dropdown list. Add short embedded dropdown choices in the inspector with one option per line or comma-separated values.</p>
+          <p>Input Smart Cells can use a free text control or a controlled dropdown control. Choose Dropdown in Input Control, then add short embedded choices in the inspector with one option per line or comma-separated values.</p>
           <ul>
             <li>Dropdowns render directly in the grid.</li>
             <li>The same dropdown options render in Runner Preview.</li>
@@ -1929,10 +1973,8 @@ function Row({
         const selected = selectedAddress === address;
         const editing = editingAddress === address;
         const issues = issueMap.get(address) ?? [];
-        const hasDropdown = cell.inputOptions.length > 0;
-        const dropdownOptions = hasDropdown && cell.entry && !cell.inputOptions.includes(cell.entry)
-          ? [cell.entry, ...cell.inputOptions]
-          : cell.inputOptions;
+        const hasDropdown = isDropdownCell(cell);
+        const dropdownOptions = dropdownOptionsForCell(cell);
         return (
           <div
             className="gridCell"
@@ -2121,28 +2163,37 @@ function makeCell(
   type: SmartCellType,
   options: Partial<Omit<GridCell, "address" | "entry" | "type">> = {},
 ): GridCell {
-  return {
+  const cell: GridCell = {
     address,
     entry,
     name: "",
     label: "",
     role: entry.startsWith("=") ? "formula" : "input",
     type,
+    inputControl: "freeText",
     inputOptions: [],
     surfaced: false,
     annotation: "",
     ruleMessage: "",
     ...options,
   };
+
+  if (cell.inputOptions.length > 0 && options.inputControl === undefined) {
+    cell.inputControl = "dropdown";
+  }
+
+  return cell;
 }
 
 function hydrateCells(cells: Record<string, GridCell>): Record<string, GridCell> {
   return Object.fromEntries(
     Object.entries(cells).map(([address, cell]) => {
+      const inputOptions = cell.inputOptions ?? [];
       const hydrated = {
         ...makeCell(address, "", "text"),
         ...cell,
-        inputOptions: cell.inputOptions ?? [],
+        inputControl: cell.inputControl ?? (inputOptions.length > 0 ? "dropdown" : "freeText"),
+        inputOptions,
         lookup: cell.lookup ?? (cell.role === "lookup" || cell.role === "action" ? starterLookup : undefined),
       };
 
@@ -2546,12 +2597,24 @@ function applyCellPatch(cell: GridCell, patch: Partial<GridCell>): GridCell {
   const next = { ...cell, ...patch };
   const hasName = Boolean(next.name);
   const hasFormulaEntry = typeof next.entry === "string" && next.entry.trim().startsWith("=");
+  next.inputOptions = next.inputOptions ?? [];
+  next.inputControl = next.inputControl ?? (next.inputOptions.length > 0 ? "dropdown" : "freeText");
 
   if (hasName && hasFormulaEntry && next.role === "input" && patch.role === undefined) {
     next.role = "formula";
   }
 
   return next;
+}
+
+function isDropdownCell(cell: GridCell): boolean {
+  return cell.role === "input" && cell.inputControl === "dropdown";
+}
+
+function dropdownOptionsForCell(cell: GridCell): string[] {
+  if (!isDropdownCell(cell)) return [];
+  if (cell.entry && !cell.inputOptions.includes(cell.entry)) return [cell.entry, ...cell.inputOptions];
+  return cell.inputOptions;
 }
 
 function toEngineCells(cells: Record<string, GridCell>): EngineCell[] {

@@ -8,6 +8,8 @@ export interface LookupConfig {
   rows: Array<Record<string, CellValue>>;
 }
 
+export type InputControl = "freeText" | "dropdown";
+
 export interface GridCell {
   address: string;
   entry: string;
@@ -15,6 +17,7 @@ export interface GridCell {
   label: string;
   role: SmartCellRole;
   type: SmartCellType;
+  inputControl: InputControl;
   inputOptions: string[];
   surfaced: boolean;
   annotation: string;
