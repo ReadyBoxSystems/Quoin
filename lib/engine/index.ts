@@ -26,6 +26,20 @@ math.import(
       const places = toNumber(decimals) ?? 0;
       return Number(numericValue.toFixed(places));
     },
+    ROUNDUP: (value: unknown, decimals?: unknown) => {
+      const numericValue = toNumber(value) ?? 0;
+      const places = Math.trunc(toNumber(decimals) ?? 0);
+      const factor = 10 ** places;
+      if (!Number.isFinite(factor) || factor === 0) return numericValue;
+      return Math.sign(numericValue) * Math.ceil(Math.abs(numericValue) * factor) / factor;
+    },
+    roundup: (value: unknown, decimals?: unknown) => {
+      const numericValue = toNumber(value) ?? 0;
+      const places = Math.trunc(toNumber(decimals) ?? 0);
+      const factor = 10 ** places;
+      if (!Number.isFinite(factor) || factor === 0) return numericValue;
+      return Math.sign(numericValue) * Math.ceil(Math.abs(numericValue) * factor) / factor;
+    },
     ABS: (value: unknown) => Math.abs(toNumber(value) ?? 0),
     SQRT: (value: unknown) => Math.sqrt(toNumber(value) ?? 0),
     CEIL: (value: unknown) => Math.ceil(toNumber(value) ?? 0),
@@ -48,6 +62,8 @@ const ALLOWED_FUNCTIONS = new Set([
   "MIN",
   "round",
   "ROUND",
+  "ROUNDUP",
+  "roundup",
   "abs",
   "ABS",
   "sqrt",

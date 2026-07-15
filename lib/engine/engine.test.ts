@@ -118,6 +118,21 @@ test("evaluates IF formulas", () => {
   assertEq(result.outputs.load_band, "heavy", "IF should return the matching branch");
 });
 
+test("evaluates ROUNDUP formulas", () => {
+  const result = executeEngine({
+    cells: [
+      cell({ id: "a", address: "A1", name: "positive", role: "output", formula: "ROUNDUP(12.01, 0)", surfaced: true }),
+      cell({ id: "b", address: "A2", name: "negative", role: "output", formula: "ROUNDUP(-12.01, 0)", surfaced: true }),
+      cell({ id: "c", address: "A3", name: "decimal", role: "output", formula: "ROUNDUP(12.341, 2)", surfaced: true }),
+    ],
+  });
+
+  assertEq(result.valid, true, "ROUNDUP formulas should be valid");
+  assertEq(result.outputs.positive, 13, "ROUNDUP should round positive numbers away from zero");
+  assertEq(result.outputs.negative, -13, "ROUNDUP should round negative numbers away from zero");
+  assertEq(result.outputs.decimal, 12.35, "ROUNDUP should honor decimal places");
+});
+
 test("surfaces action outputs", () => {
   const result = executeEngine({
     cells: [

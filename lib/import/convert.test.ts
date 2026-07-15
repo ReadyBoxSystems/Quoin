@@ -59,6 +59,20 @@ runTest("expands dimensions to fit imported content", () => {
   assert.equal(converted.cells.AA20.entry, "true");
 });
 
+runTest("expands dimensions to fit imported dropdown-only cells", () => {
+  const converted = convertImportedSheetToQuoin(
+    makeSheet({
+      dimensions: { rowCount: 1, columnCount: 1 },
+      dataValidations: [{ address: "U4", type: "list", options: ["0", "1", "2", "3"] }],
+    }),
+  );
+
+  assert.equal(converted.columnCount, 21);
+  assert.equal(converted.rowCount, 18);
+  assert.equal(converted.cells.U4.inputControl, "dropdown");
+  assert.equal(converted.cells.U4.surfaced, true);
+});
+
 runTest("skips invalid cell addresses and adds a review item", () => {
   const converted = convertImportedSheetToQuoin(
     makeSheet({
@@ -118,6 +132,23 @@ runTest("reports ranges without promoting them", () => {
   assert.equal(converted.reviewItems[0].severity, "info");
 });
 
+runTest("reports likely large reference data sheets", () => {
+  const converted = convertImportedSheetToQuoin(
+    makeSheet({
+      name: "Beam Data",
+      dimensions: { rowCount: 1200, columnCount: 7 },
+      cells: [
+        { address: "A1", kind: "value", value: "CODE" },
+        { address: "F1", kind: "value", value: "HELPER" },
+        { address: "G1", kind: "value", value: "SPAN" },
+      ],
+    }),
+  );
+
+  assert.equal(converted.reviewItems.length, 1);
+  assert.match(converted.reviewItems[0].message, /looks like reference data/);
+});
+
 runTest("does not promote names that reference a different sheet", () => {
   const converted = convertImportedSheetToQuoin(
     makeSheet({
@@ -142,6 +173,12 @@ runTest("flags imported formulas that need compatibility review", () => {
         { address: "A3", kind: "formula", formula: "SUM('[Other.xlsx]Sheet1'!A1)" },
         { address: "A4", kind: "formula", formula: "SUM(A1;A2)" },
         { address: "A5", kind: "formula", formula: "A1#" },
+        { address: "A6", kind: "formula", formula: "VLOOKUP(B1,'Reference Data'!A2:B10,2,FALSE)" },
+        { address: "A7", kind: "formula", formula: "VLOOKUP(B1,'Reference Data'!A2:B10,2)" },
+        { address: "A8", kind: "formula", formula: "ROUNDUP(B1/50,0)*50" },
+        { address: "A9", kind: "formula", formula: "IFERROR(B1/C1,0)" },
+        { address: "A10", kind: "formula", formula: "INDIRECT(\"B\"&1)" },
+        { address: "A11", kind: "formula", formula: "SUMIFS(C1:C10,A1:A10,B1)" },
       ],
     }),
   );
@@ -152,6 +189,12 @@ runTest("flags imported formulas that need compatibility review", () => {
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("external workbook reference")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("semicolon argument separator")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("dynamic array")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("can be rebuilt as a Quoin Reference Table lookup")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("defaults to approximate matching")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.formula === "=ROUNDUP(B1/50,0)*50").length, 0);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("decide what fallback value is safe")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("builds references dynamically")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("convert the criteria ranges into a Reference Table")).length, 1);
 });
 
 runTest("imports literal Excel dropdown lists as input options", () => {

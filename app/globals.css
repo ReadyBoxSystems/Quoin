@@ -407,6 +407,41 @@ h1 {
   font-size: 12px;
 }
 
+.sheetRename {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.sheetRename span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sheetRename input {
+  background: var(--sheet);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  min-height: 34px;
+  outline: none;
+  padding: 7px 8px;
+  width: 180px;
+}
+
+.sheetRename input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.12);
+}
+
 .spreadsheetGrid {
   display: grid;
   grid-template-columns: 36px repeat(16, 64px);
@@ -439,6 +474,27 @@ h1 {
 .rowHeader {
   justify-content: center;
   padding: 0;
+}
+
+.sheetCorner,
+.columnHeader {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.sheetCorner,
+.rowHeader {
+  left: 0;
+  position: sticky;
+}
+
+.sheetCorner {
+  z-index: 4;
+}
+
+.rowHeader {
+  z-index: 2;
 }
 
 .gridCell {
@@ -1011,6 +1067,10 @@ h1 {
   margin-top: 12px;
 }
 
+.runnerStripSingle {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .runnerStrip > div {
   background: var(--sheet);
   border: 1px solid var(--line);
@@ -1078,6 +1138,10 @@ h1 {
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.runnerGridSingle {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .runnerPanel {
@@ -1194,12 +1258,12 @@ h1 {
   font-size: 13px;
 }
 
-.runnerStrip > div:nth-child(2) {
+.runnerStrip > div[data-kind="warning"] {
   background: var(--warn-bg);
   border-color: #efd8a5;
 }
 
-.runnerStrip > div:nth-child(2) strong {
+.runnerStrip > div[data-kind="warning"] strong {
   color: var(--warn-ink);
 }
 

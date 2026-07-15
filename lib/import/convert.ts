@@ -6,6 +6,19 @@ const defaultImportedColumnCount = 8;
 const defaultImportedRowCount = 18;
 const cellAddressPattern = /^([A-Z]+)([1-9]\d*)$/;
 const safeSmartCellNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const supportedFormulaFunctions = new Set([
+  "SUM",
+  "AVERAGE",
+  "MAX",
+  "MIN",
+  "ROUND",
+  "ROUNDUP",
+  "ABS",
+  "SQRT",
+  "CEIL",
+  "FLOOR",
+  "IF",
+]);
 
 export interface ConvertedSheet {
   cells: Record<string, GridCell>;
@@ -28,6 +41,15 @@ export function convertImportedSheetToQuoin(sheet: ImportedSheet, options: Conve
   const cells: Record<string, GridCell> = {};
   let maxColumnCount = Math.max(minimumColumnCount, sheet.dimensions.columnCount);
   let maxRowCount = Math.max(minimumRowCount, sheet.dimensions.rowCount);
+  const formulaCount = sheet.cells.filter((cell) => cell.kind === "formula").length;
+
+  if (sheet.dimensions.rowCount >= 1000 && formulaCount === 0) {
+    reviewItems.push({
+      severity: "info",
+      sheetName: sheet.name,
+      message: `Sheet "${sheet.name}" looks like reference data (${sheet.dimensions.rowCount} rows, ${sheet.dimensions.columnCount} columns, no formulas). Quoin preserved it as a Sheet for now. Future Reference Table support should bind lookups to this data instead of surfacing it in Runner Preview.`,
+    });
+  }
 
   for (const importedCell of sheet.cells) {
     const address = normalizeCellAddress(importedCell.address);
@@ -64,6 +86,14 @@ export function convertImportedSheetToQuoin(sheet: ImportedSheet, options: Conve
     sheetName: sheet.name,
     reviewItems,
   });
+
+  for (const validation of sheet.dataValidations ?? []) {
+    const address = normalizeCellAddress(validation.address);
+    if (!address) continue;
+    const position = parseCellAddress(address);
+    maxColumnCount = Math.max(maxColumnCount, position.columnNumber);
+    maxRowCount = Math.max(maxRowCount, position.rowNumber);
+  }
 
   return {
     cells,
@@ -169,6 +199,38 @@ function reviewImportedFormula(
   const formula = importedCell.formula;
   const warningMessages: string[] = [];
 
+  for (const vlookup of findFunctionCalls(formula, "VLOOKUP")) {
+    const args = splitFormulaArguments(vlookup.args);
+    const lookupValue = args[0] ?? "";
+    const tableRange = args[1] ?? "";
+    const outputColumn = args[2] ?? "";
+    const matchMode = args[3] ?? "";
+    const exactMatch = /^(false|0)$/i.test(matchMode.trim());
+    const omittedMatchMode = args.length < 4 || matchMode.trim() === "";
+
+    reviewItems.push({
+      severity: "warning",
+      sheetName,
+      address,
+      formula: normalizeFormulaEntry(formula),
+      message: exactMatch
+        ? `Excel VLOOKUP at ${address} can be rebuilt as a Quoin Reference Table lookup. Source range: ${tableRange}; lookup key: ${lookupValue}; output column index: ${outputColumn}; match mode: exact. Import/preserve that range as reference data, then bind this cell to the matching table output instead of leaving the Excel VLOOKUP formula in place.`
+        : `Excel VLOOKUP at ${address} needs review before translation. Source range: ${tableRange || "unknown"}; lookup key: ${lookupValue || "unknown"}; output column index: ${outputColumn || "unknown"}. ${omittedMatchMode ? "Excel omits the match-mode argument here, which defaults to approximate matching." : `Match mode is ${matchMode}.`} Quoin should only auto-translate confirmed exact-match lookups; confirm the intended match behavior or rebuild this as a Reference Table lookup.`,
+    });
+  }
+
+  for (const functionName of functionNamesInFormula(formula)) {
+    if (supportedFormulaFunctions.has(functionName) || functionName === "VLOOKUP") continue;
+    const guidance = unsupportedFunctionGuidance(functionName);
+    reviewItems.push({
+      severity: guidance.severity,
+      sheetName,
+      address,
+      formula: normalizeFormulaEntry(formula),
+      message: guidance.message(address, functionName),
+    });
+  }
+
   if (/\[[^\]]+\][^!]*!/.test(formula)) {
     warningMessages.push("external workbook reference");
   }
@@ -194,6 +256,133 @@ function reviewImportedFormula(
       message: `Formula may need review: ${message}.`,
     });
   }
+}
+
+function functionNamesInFormula(formula: string): string[] {
+  const names = new Set<string>();
+  const pattern = /\b([A-Za-z_][A-Za-z0-9_.]*)\s*\(/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(formula))) {
+    names.add(match[1].toUpperCase());
+  }
+
+  return [...names];
+}
+
+function unsupportedFunctionGuidance(functionName: string): {
+  severity: ImportReviewItem["severity"];
+  message: (address: string, functionName: string) => string;
+} {
+  if (functionName === "IFERROR" || functionName === "IFNA") {
+    return {
+      severity: "warning",
+      message: (address, name) => `Excel ${name} at ${address} is preserved but not evaluated by Quoin yet. Repair path: inspect the wrapped expression, decide what fallback value is safe for this workflow, and replace it with an explicit IF rule or a Quoin validation/review message so failures are visible instead of hidden.`,
+    };
+  }
+
+  if (functionName === "INDIRECT" || functionName === "OFFSET") {
+    return {
+      severity: "warning",
+      message: (address, name) => `Excel ${name} at ${address} is preserved but cannot be safely translated because it builds references dynamically. Repair path: replace the dynamic reference with direct cell references, or move the selectable data into a Reference Table and bind the selection as lookup criteria.`,
+    };
+  }
+
+  if (functionName === "XLOOKUP" || functionName === "HLOOKUP" || functionName === "LOOKUP") {
+    return {
+      severity: "warning",
+      message: (address, name) => `Excel ${name} at ${address} is preserved but not evaluated by Quoin yet. Repair path: rebuild it as an exact-match Reference Table lookup with explicit criteria and output column. Approximate or fallback behavior needs manual confirmation before translation.`,
+    };
+  }
+
+  if (functionName === "INDEX" || functionName === "MATCH") {
+    return {
+      severity: "info",
+      message: (address, name) => `Excel ${name} at ${address} is preserved for review. Repair path: if this is an INDEX/MATCH lookup, convert the source range into a Reference Table and bind the MATCH inputs as lookup criteria.`,
+    };
+  }
+
+  if (functionName === "SUMIF" || functionName === "SUMIFS" || functionName === "COUNTIF" || functionName === "COUNTIFS" || functionName === "AVERAGEIF" || functionName === "AVERAGEIFS") {
+    return {
+      severity: "info",
+      message: (address, name) => `Excel ${name} at ${address} is preserved for review. Repair path: convert the criteria ranges into a Reference Table or helper calculation, then define explicit criteria and the aggregate output Quoin should calculate.`,
+    };
+  }
+
+  if (["TODAY", "NOW", "DATE", "YEAR", "MONTH", "DAY"].includes(functionName)) {
+    return {
+      severity: "warning",
+      message: (address, name) => `Excel date function ${name} at ${address} is preserved but not evaluated by Quoin. Repair path: replace it with a fixed input, a numeric date/code field, or a future Quoin date rule after date semantics are defined.`,
+    };
+  }
+
+  return {
+    severity: "warning",
+    message: (address, name) => `Excel function ${name} at ${address} is preserved but not currently supported by Quoin. Repair path: replace it with supported arithmetic, IF, range functions, or model the logic as a Smart Cell/reference-table step.`,
+  };
+}
+
+function findFunctionCalls(formula: string, functionName: string): Array<{ args: string }> {
+  const calls: Array<{ args: string }> = [];
+  const pattern = new RegExp(`\\b${functionName}\\s*\\(`, "gi");
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(formula))) {
+    const openIndex = match.index + match[0].lastIndexOf("(");
+    const closeIndex = matchingParenIndex(formula, openIndex);
+    if (closeIndex === null) continue;
+    calls.push({ args: formula.slice(openIndex + 1, closeIndex) });
+    pattern.lastIndex = closeIndex + 1;
+  }
+
+  return calls;
+}
+
+function matchingParenIndex(value: string, openIndex: number): number | null {
+  let depth = 0;
+  let inString = false;
+
+  for (let index = openIndex; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "(") depth += 1;
+    if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+
+  return null;
+}
+
+function splitFormulaArguments(args: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  let inString = false;
+
+  for (const char of args) {
+    if (char === '"') {
+      inString = !inString;
+      current += char;
+      continue;
+    }
+    if (!inString && char === "(") depth += 1;
+    if (!inString && char === ")") depth -= 1;
+    if (!inString && depth === 0 && char === ",") {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  parts.push(current.trim());
+  return parts;
 }
 
 function makeImportedGridCell(address: string, importedCell: ImportedCell): GridCell {

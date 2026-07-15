@@ -309,23 +309,6 @@ export function VariableSheet() {
   }, [activeConfigId, isLoaded]);
 
   useEffect(() => {
-    if (!isLoaded) return;
-
-    const smartCells = Object.values(cells).filter((cell) => cell.name);
-    if (smartCells.length === 0 || smartCells.some((cell) => cell.surfaced)) return;
-
-    setCells((current) => {
-      return Object.fromEntries(
-        Object.entries(current).map(([address, cell]) => [
-          address,
-          cell.name ? { ...cell, surfaced: true } : cell,
-        ]),
-      );
-    });
-    setIsDirty(true);
-  }, [cells, isLoaded]);
-
-  useEffect(() => {
     if (!editingAddress) return;
     editInputRef.current?.focus();
     editInputRef.current?.select();
@@ -889,6 +872,28 @@ export function VariableSheet() {
     setIsDirty(true);
   }
 
+  function renameSheet(sheetId: string, name: string) {
+    const nextName = name.trimStart();
+    const workbookSheets = currentWorkbookSheets();
+    const renamedSheet = workbookSheets.find((sheet) => sheet.id === sheetId);
+    const finalName = nextName || "Untitled Sheet";
+    if (!renamedSheet || renamedSheet.name === finalName) return;
+
+    const nextSheets = workbookSheets.map((sheet) => ({
+      ...sheet,
+      name: sheet.id === sheetId ? finalName : sheet.name,
+      cells: renameSheetReferences(sheet.cells, renamedSheet.name, finalName),
+    }));
+    const nextActiveSheet = nextSheets.find((sheet) => sheet.id === activeSheetId) ?? nextSheets[0];
+    setSheets(nextSheets);
+    if (nextActiveSheet) {
+      setCells(nextActiveSheet.cells);
+      setColumnCount(nextActiveSheet.columnCount);
+      setRowCount(nextActiveSheet.rowCount);
+    }
+    setIsDirty(true);
+  }
+
   function confirmDiscardUnsaved() {
     if (!isDirty) return true;
     return window.confirm("You have unsaved changes. Continue without saving them?");
@@ -1176,6 +1181,7 @@ export function VariableSheet() {
           <SheetStrip
             activeSheetId={activeSheetId}
             addSheet={addSheet}
+            renameSheet={renameSheet}
             sheets={visibleSheets}
             switchSheet={switchSheet}
           />
@@ -1248,16 +1254,22 @@ export function VariableSheet() {
         <HelpPanel />
       )}
 
-      <section className="runnerStrip">
-        <div>
-          <span>Outputs</span>
-          <strong>{formatOutputs(workbookResult.outputs)}</strong>
-        </div>
-        <div>
-          <span>Compliance</span>
-          <strong>{workbookResult.warnings.length ? formatWorkbookWarnings(workbookResult.warnings, runnerSheets) : "No warnings"}</strong>
-        </div>
-      </section>
+      {(Object.keys(workbookResult.outputs).length > 0 || workbookResult.warnings.length > 0) && (
+        <section className={`runnerStrip ${workbookResult.warnings.length === 0 ? "runnerStripSingle" : ""}`}>
+          {Object.keys(workbookResult.outputs).length > 0 && (
+            <div>
+              <span>Surfaced Results</span>
+              <strong>{formatOutputs(workbookResult.outputs)}</strong>
+            </div>
+          )}
+          {workbookResult.warnings.length > 0 && (
+            <div data-kind="warning">
+              <span>Review Needed</span>
+              <strong>{formatWorkbookWarnings(workbookResult.warnings, runnerSheets)}</strong>
+            </div>
+          )}
+        </section>
+      )}
     </>
   );
 }
@@ -1265,14 +1277,18 @@ export function VariableSheet() {
 function SheetStrip({
   activeSheetId,
   addSheet,
+  renameSheet,
   sheets,
   switchSheet,
 }: {
   activeSheetId: string;
   addSheet: () => void;
+  renameSheet: (sheetId: string, name: string) => void;
   sheets: WorkbookSheet[];
   switchSheet: (sheetId: string) => void;
 }) {
+  const activeSheet = sheets.find((sheet) => sheet.id === activeSheetId) ?? sheets[0];
+
   return (
     <aside className="sheetStrip" aria-label="Sheets">
       <div className="sheetStripHeader">Sheets</div>
@@ -1295,6 +1311,15 @@ function SheetStrip({
       <button type="button" className="sheetAddButton" onClick={addSheet}>
         Add Sheet
       </button>
+      {activeSheet && (
+        <label className="sheetRename">
+          <span>Active Sheet</span>
+          <input
+            value={activeSheet.name}
+            onChange={(event) => renameSheet(activeSheet.id, event.target.value)}
+          />
+        </label>
+      )}
     </aside>
   );
 }
@@ -1368,7 +1393,7 @@ function Inspector({
               const name = sanitizeName(event.target.value);
               updateCell(selectedAddress, {
                 name,
-                surfaced: name ? selectedCell.surfaced || !selectedCell.name : false,
+                surfaced: name ? selectedCell.surfaced : false,
               });
             }}
           />
@@ -1594,7 +1619,7 @@ function RunnerPreview({
         <span data-valid={result.valid}>{result.valid ? "Ready" : "Failed Validation"}</span>
       </div>
 
-      <div className="runnerGrid">
+      <div className={`runnerGrid ${outputGroups.length === 0 ? "runnerGridSingle" : ""}`}>
         <div className="runnerPanel">
           <h3>Inputs</h3>
           {inputGroups.length === 0 ? (
@@ -1623,12 +1648,10 @@ function RunnerPreview({
           )}
         </div>
 
-        <div className="runnerPanel">
-          <h3>Outputs</h3>
-          {outputGroups.length === 0 ? (
-            <p className="runnerEmpty">No surfaced outputs.</p>
-          ) : (
-            outputGroups.map((group) => (
+        {outputGroups.length > 0 && (
+          <div className="runnerPanel">
+            <h3>Outputs</h3>
+            {outputGroups.map((group) => (
               <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
                 {group.items.map((cell) => (
                   <div className="runnerResult" key={`${group.sheetId}-${cell.address}`}>
@@ -1638,9 +1661,9 @@ function RunnerPreview({
                   </div>
                 ))}
               </RunnerSheetGroup>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {(actionGroups.length > 0 || warningGroups.length > 0) && (
@@ -1731,7 +1754,8 @@ function HelpPanel() {
       <div className="helpGrid">
         <article>
           <h3>Core Idea</h3>
-          <p>Quoin should feel familiar to anyone who has used Excel: cells have coordinates, formulas can reference other cells, and imported workbooks keep their sheet structure. The difference is that named cells can carry metadata and can be surfaced into Runner Preview.</p>
+          <p>Quoin should feel familiar to anyone who has used Excel: cells have coordinates, formulas can reference other cells, and imported workbooks keep their Sheet structure. The difference is that named cells can carry metadata, controls, runner labels, validation, and review behavior.</p>
+          <p>The authoring grid is still the source of truth. Build and import calculator logic first, prove the math, then promote the important cells into Smart Cells for runner-facing workflow behavior.</p>
         </article>
 
         <article>
@@ -1751,6 +1775,8 @@ function HelpPanel() {
             <li>Smart Cell names are workbook-scoped when unique.</li>
             <li>Formulas on any Sheet can reference a unique Smart Cell name directly.</li>
             <li>Metadata stays in the inspector so the grid remains spreadsheet-first.</li>
+            <li>Naming a cell does not automatically show it to the runner. Turn on Surface to runner when the cell belongs in Runner Preview.</li>
+            <li>Imported Excel dropdown cells are the exception: supported dropdown inputs are surfaced automatically so the imported control remains visible where it is used.</li>
           </ul>
         </article>
 
@@ -1761,7 +1787,7 @@ function HelpPanel() {
             <li>Verify the math works in the Sheet view.</li>
             <li>Name important cells to promote them to Smart Cells.</li>
             <li>Set role, value type, input control, display label, annotation, dropdown options, or rule text in the inspector.</li>
-            <li>Turn on Surface in Runner Preview for the cells the runner should see.</li>
+            <li>Turn on Surface to runner only for the cells the runner should see.</li>
             <li>Use Runner Preview to test the controlled form.</li>
           </ol>
         </article>
@@ -1773,11 +1799,12 @@ function HelpPanel() {
             <li><code>input</code>: a value supplied by an admin or runner.</li>
             <li><code>formula</code>: internal calculated logic.</li>
             <li><code>output</code>: a calculated or entered result.</li>
-            <li><code>lookup</code>: a value resolved from a lookup table.</li>
+            <li><code>lookup</code>: a prototype value resolved from an embedded lookup table.</li>
             <li><code>action</code>: a runner-facing shop note or required action.</li>
             <li><code>validation</code>: PASS or FAIL rule result.</li>
             <li><code>compliance</code>: OK or WARN review result.</li>
           </ul>
+          <p>The current lookup role is useful for small demos, but imported shop calculators point toward first-class Reference Tables instead of large hidden lookup tables inside one Smart Cell.</p>
         </article>
 
         <article>
@@ -1825,6 +1852,7 @@ function HelpPanel() {
             <li><code>=AVERAGE(A1:A5)</code> calculates the mean.</li>
             <li><code>=MIN(A1:A5)</code> and <code>=MAX(A1:A5)</code> find bounds.</li>
             <li><code>=ROUND(B6, 2)</code> rounds to two decimal places.</li>
+            <li><code>=ROUNDUP(B6, 0)</code> rounds away from zero, matching the common Excel calculator pattern.</li>
             <li><code>=ABS(B2)</code>, <code>=SQRT(B2)</code>, <code>=CEIL(B2)</code>, and <code>=FLOOR(B2)</code> cover common numeric cleanup.</li>
           </ul>
           <h4>Conditions And IF</h4>
@@ -1835,12 +1863,13 @@ function HelpPanel() {
             <li><code>=IF(design_span&gt;14, "review", recommended_beam)</code> combines Smart Cell names and IF.</li>
             <li><code>=IF(total_line_load&gt;9000, "engineering review", "standard")</code> returns runner-readable text.</li>
           </ul>
-          <p>Supported aliases include SUM, AVERAGE, MAX, MIN, ROUND, ABS, SQRT, CEIL, and FLOOR.</p>
+          <p>Supported aliases include SUM, AVERAGE, MAX, MIN, ROUND, ROUNDUP, ABS, SQRT, CEIL, and FLOOR.</p>
           <h4>Formula Editing Notes</h4>
           <ul>
             <li>While typing a formula, the reference popup suggests named Smart Cells and populated coordinates.</li>
             <li>Copy, paste, and fill-down adjust coordinate references while leaving Smart Cell names unchanged.</li>
             <li>Deleted row or column references become <code>#REF!</code> so broken formulas remain visible.</li>
+            <li>Renaming a Sheet updates direct cross-Sheet references that use the old Sheet name.</li>
             <li>Incomplete formulas should not crash the app while you are still typing.</li>
           </ul>
         </article>
@@ -1849,9 +1878,11 @@ function HelpPanel() {
           <h3>Sheets</h3>
           <p>A configuration can contain multiple Sheets. Sheet tabs sit below the formula bar and above the grid. The authoring grid shows one active Sheet at a time, while Runner Preview can gather surfaced Smart Cells from the whole workbook.</p>
           <ul>
+            <li>Use the Active Sheet field in the Sheet strip to rename the current Sheet.</li>
             <li>Use coordinate formulas on the current Sheet, such as <code>=A1+B1</code>.</li>
             <li>Use supported cross-Sheet references, such as <code>=Inputs!B2 * Inputs!B3</code>.</li>
             <li>Use unique Smart Cell names across Sheets, such as <code>=design_span * design_plf</code>.</li>
+            <li>Column headers stay visible while scrolling down the grid, and row numbers stay visible while scrolling sideways.</li>
           </ul>
         </article>
 
@@ -1864,6 +1895,8 @@ function HelpPanel() {
             <li>Action cells show shop notes or required actions.</li>
             <li>Validation cells show PASS or FAIL.</li>
             <li>Compliance cells show OK or WARN.</li>
+            <li>Empty output, action, review, and validation sections stay hidden so the runner view stays focused.</li>
+            <li>The bottom summary appears only when there are surfaced results or review warnings.</li>
           </ul>
         </article>
 
@@ -1879,12 +1912,24 @@ function HelpPanel() {
 
         <article>
           <h3>Lookup Cells</h3>
-          <p>Lookup Smart Cells can match one or more input criteria against the embedded lookup table editor. The current editor is a prototype shortcut; the longer-term product direction is first-class reference tables or CSV-ingested datasets.</p>
+          <p>Lookup Smart Cells can match one or more input criteria against the embedded lookup table editor. The current editor is a prototype shortcut for small examples; the longer-term product direction is first-class Reference Tables or CSV-ingested datasets.</p>
           <ul>
             <li>Use criteria columns to match input Smart Cell names.</li>
             <li>Choose an output column to return the lookup result.</li>
             <li>Paste tabular data from Excel into the lookup table editor.</li>
             <li>A lookup miss shows <code>#ERR</code> so missing data is visible.</li>
+            <li>Do not use the embedded lookup editor for thousands of rows. Large imported data Sheets should become Reference Tables in a later workflow.</li>
+          </ul>
+        </article>
+
+        <article>
+          <h3>Reference Data Direction</h3>
+          <p>Real shop calculators often use large data tabs and Excel lookup formulas. Quoin now calls out likely reference-data Sheets during import so the admin can tell the difference between a calculator Sheet and a data Sheet.</p>
+          <ul>
+            <li>A large Sheet with many rows and no formulas is preserved as a normal Sheet for now and marked as likely reference data.</li>
+            <li>Exact-match Excel <code>VLOOKUP</code> formulas are preserved, but review items explain the source range, lookup key, output column, and Reference Table repair path.</li>
+            <li>Quoin should eventually bind these formulas to visible/imported Reference Tables instead of hiding thousands of rows inside Smart Cell metadata.</li>
+            <li>Runner Preview should show surfaced inputs and results, not raw reference-data rows.</li>
           </ul>
         </article>
 
@@ -1895,8 +1940,22 @@ function HelpPanel() {
             <li>Workbook Sheets, values, and formulas are preserved.</li>
             <li>Safe workbook-defined single-cell names can become Smart Cell names.</li>
             <li>Simple Excel data-validation lists and supported workbook range sources can become dropdown options on imported input Smart Cells.</li>
+            <li>Dropdown-only cells still expand the imported Sheet bounds, so controls outside the normal used range remain visible.</li>
             <li>Merged ranges, named ranges, external workbook links, structured table references, spill markers, and other risky features appear as review items.</li>
             <li>Unsupported formulas remain visible instead of being silently dropped.</li>
+            <li>Review items try to explain the repair path, such as converting an exact-match <code>VLOOKUP</code> into a Reference Table lookup or replacing <code>INDIRECT</code> with direct references.</li>
+          </ul>
+        </article>
+
+        <article>
+          <h3>Formula Review Items</h3>
+          <p>Imported Excel formulas are classified conservatively. Quoin supports the common subset it can evaluate deterministically and preserves the rest for review.</p>
+          <ul>
+            <li><code>VLOOKUP</code>: exact-match lookups should become Reference Table lookups. Approximate or omitted match-mode lookups need manual confirmation.</li>
+            <li><code>IFERROR</code> and <code>IFNA</code>: decide what fallback is safe, then model it with explicit <code>IF</code>, validation, or review messaging.</li>
+            <li><code>INDIRECT</code> and <code>OFFSET</code>: replace dynamic address logic with direct references or a Reference Table selection.</li>
+            <li><code>SUMIFS</code>, <code>COUNTIFS</code>, and similar criteria formulas: move the criteria ranges into a Reference Table or helper calculation before modeling the aggregate.</li>
+            <li>Date and time functions need a separate date-semantics decision before Quoin should evaluate them.</li>
           </ul>
         </article>
 
@@ -2433,6 +2492,49 @@ function updateCellAddress(cell: GridCell, address: string, formulaTransform: (e
     address,
     entry: cell.entry.trim().startsWith("=") ? formulaTransform(cell.entry) : cell.entry,
   };
+}
+
+function renameSheetReferences(cells: Record<string, GridCell>, oldName: string, newName: string): Record<string, GridCell> {
+  return Object.fromEntries(
+    Object.entries(cells).map(([address, cell]) => [
+      address,
+      {
+        ...cell,
+        entry: replaceSheetNameInFormula(cell.entry, oldName, newName),
+        lookup: cell.lookup
+          ? {
+              ...cell.lookup,
+              inputReference: replaceSheetNameInFormula(cell.lookup.inputReference, oldName, newName),
+              inputs: cell.lookup.inputs?.map((input) => ({
+                ...input,
+                reference: replaceSheetNameInFormula(input.reference, oldName, newName),
+              })),
+            }
+          : cell.lookup,
+      },
+    ]),
+  );
+}
+
+function replaceSheetNameInFormula(entry: string, oldName: string, newName: string): string {
+  if (!entry.includes("!")) return entry;
+  const nextPrefix = sheetReferencePrefix(newName);
+  const escapedQuotedName = escapeRegExp(oldName.replace(/'/g, "''"));
+  const escapedPlainName = escapeRegExp(oldName);
+
+  return entry
+    .replace(new RegExp(`'${escapedQuotedName}'!`, "g"), `${nextPrefix}!`)
+    .replace(new RegExp(`\\b${escapedPlainName}!`, "g"), `${nextPrefix}!`);
+}
+
+function sheetReferencePrefix(sheetName: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheetName)
+    ? sheetName
+    : `'${sheetName.replace(/'/g, "''")}'`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function shiftInsertedRowReferences(entry: string, insertAt: number): string {
