@@ -189,12 +189,107 @@ runTest("flags imported formulas that need compatibility review", () => {
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("external workbook reference")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("semicolon argument separator")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("dynamic array")).length, 1);
-  assert.equal(converted.reviewItems.filter((item) => item.message.includes("can be rebuilt as a Quoin Reference Table lookup")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("preserved as a normal formula")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("defaults to approximate matching")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.formula === "=ROUNDUP(B1/50,0)*50").length, 0);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("decide what fallback value is safe")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("builds references dynamically")).length, 1);
   assert.equal(converted.reviewItems.filter((item) => item.message.includes("convert the criteria ranges into a Reference Table")).length, 1);
+});
+
+runTest("preserves exact VLOOKUP formulas as normal formula cells", () => {
+  const converted = convertImportedSheetToQuoin(
+    makeSheet({
+      dimensions: { rowCount: 3, columnCount: 4 },
+      cells: [
+        { address: "A1", kind: "value", value: "K1" },
+        { address: "B1", kind: "value", value: "First" },
+        { address: "A2", kind: "value", value: "K2" },
+        { address: "B2", kind: "value", value: "Second" },
+        { address: "C1", kind: "value", value: "K2" },
+        { address: "D1", kind: "formula", formula: "VLOOKUP(C1,A1:B2,2,FALSE)", value: "Second" },
+      ],
+    }),
+  );
+
+  assert.equal(converted.cells.D1.role, "formula");
+  assert.equal(converted.cells.D1.name, "");
+  assert.equal(converted.cells.D1.lookup, undefined);
+  assert.equal(converted.cells.D1.entry, "=VLOOKUP(C1,A1:B2,2,FALSE)");
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("preserved as a normal formula")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("Translated exact-match Excel VLOOKUP")).length, 0);
+});
+
+runTest("preserves helper-key VLOOKUP formulas as normal formula cells", () => {
+  const calculator = makeSheet({
+    cells: [
+      { address: "B1", kind: "value", value: 2018 },
+      { address: "C1", kind: "value", value: 27.5 },
+      { address: "D1", kind: "formula", formula: "VLOOKUP(B1&\"|\"&C1,'Reference Data'!A1:B1,2,FALSE)", value: "Beam A" },
+    ],
+  });
+  const referenceData = makeSheet({
+    id: "sheet-2",
+    name: "Reference Data",
+    dimensions: { rowCount: 1, columnCount: 2 },
+    cells: [
+      { address: "A1", kind: "value", value: "2018|27.5" },
+      { address: "B1", kind: "value", value: "Beam A" },
+    ],
+  });
+
+  const converted = convertImportedSheetToQuoin(calculator, { workbookSheets: [calculator, referenceData] });
+
+  assert.equal(converted.cells.D1.role, "formula");
+  assert.equal(converted.cells.D1.lookup, undefined);
+  assert.equal(converted.cells.D1.entry, '=VLOOKUP(B1&"|"&C1,\'Reference Data\'!A1:B1,2,FALSE)');
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("preserved as a normal formula")).length, 1);
+});
+
+runTest("flags approximate VLOOKUP formulas while preserving formula cells", () => {
+  const converted = convertImportedSheetToQuoin(
+    makeSheet({
+      cells: [
+        { address: "A1", kind: "value", value: "K1" },
+        { address: "B1", kind: "value", value: 10 },
+        { address: "C1", kind: "formula", formula: "VLOOKUP(A1,A1:B1,2)", value: 10 },
+        { address: "D1", kind: "formula", formula: "VLOOKUP(A1,A1:B1,2,FALSE)*2", value: 20 },
+      ],
+    }),
+  );
+
+  assert.equal(converted.cells.C1.role, "formula");
+  assert.equal(converted.cells.D1.role, "formula");
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("defaults to approximate matching")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("preserved as a normal formula")).length, 1);
+});
+
+runTest("preserves exact XLOOKUP formulas as normal formula cells", () => {
+  const calculator = makeSheet({
+    cells: [
+      { address: "B1", kind: "value", value: "K2" },
+      { address: "C1", kind: "formula", formula: "XLOOKUP(B1,'Reference Data'!A1:A2,'Reference Data'!B1:B2)", value: "Second" },
+    ],
+  });
+  const referenceData = makeSheet({
+    id: "sheet-2",
+    name: "Reference Data",
+    dimensions: { rowCount: 2, columnCount: 2 },
+    cells: [
+      { address: "A1", kind: "value", value: "K1" },
+      { address: "B1", kind: "value", value: "First" },
+      { address: "A2", kind: "value", value: "K2" },
+      { address: "B2", kind: "value", value: "Second" },
+    ],
+  });
+
+  const converted = convertImportedSheetToQuoin(calculator, { workbookSheets: [calculator, referenceData] });
+
+  assert.equal(converted.cells.C1.role, "formula");
+  assert.equal(converted.cells.C1.lookup, undefined);
+  assert.equal(converted.cells.C1.entry, "=XLOOKUP(B1,'Reference Data'!A1:A2,'Reference Data'!B1:B2)");
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("Excel XLOOKUP")).length, 1);
+  assert.equal(converted.reviewItems.filter((item) => item.message.includes("preserved as a normal formula")).length, 1);
 });
 
 runTest("imports literal Excel dropdown lists as input options", () => {

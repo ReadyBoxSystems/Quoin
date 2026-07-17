@@ -958,7 +958,7 @@ export function VariableSheet() {
     }
 
     const convertedSheets = pendingImport.sheets.map((sheet) => {
-      const converted = convertImportedSheetToQuoin(sheet, { names: pendingImport.names });
+      const converted = convertImportedSheetToQuoin(sheet, { names: pendingImport.names, workbookSheets: pendingImport.sheets });
       return {
         source: sheet,
         converted,

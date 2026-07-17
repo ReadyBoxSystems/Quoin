@@ -18,6 +18,8 @@ const supportedFormulaFunctions = new Set([
   "CEIL",
   "FLOOR",
   "IF",
+  "VLOOKUP",
+  "XLOOKUP",
 ]);
 
 export interface ConvertedSheet {
@@ -30,6 +32,7 @@ export interface ConvertedSheet {
 
 export interface ConvertImportedSheetOptions {
   names?: ImportedName[];
+  workbookSheets?: ImportedSheet[];
   minimumColumnCount?: number;
   minimumRowCount?: number;
 }
@@ -209,18 +212,37 @@ function reviewImportedFormula(
     const omittedMatchMode = args.length < 4 || matchMode.trim() === "";
 
     reviewItems.push({
-      severity: "warning",
+      severity: exactMatch ? "info" : "warning",
       sheetName,
       address,
       formula: normalizeFormulaEntry(formula),
       message: exactMatch
-        ? `Excel VLOOKUP at ${address} can be rebuilt as a Quoin Reference Table lookup. Source range: ${tableRange}; lookup key: ${lookupValue}; output column index: ${outputColumn}; match mode: exact. Import/preserve that range as reference data, then bind this cell to the matching table output instead of leaving the Excel VLOOKUP formula in place.`
-        : `Excel VLOOKUP at ${address} needs review before translation. Source range: ${tableRange || "unknown"}; lookup key: ${lookupValue || "unknown"}; output column index: ${outputColumn || "unknown"}. ${omittedMatchMode ? "Excel omits the match-mode argument here, which defaults to approximate matching." : `Match mode is ${matchMode}.`} Quoin should only auto-translate confirmed exact-match lookups; confirm the intended match behavior or rebuild this as a Reference Table lookup.`,
+        ? `Excel VLOOKUP at ${address} was preserved as a normal formula and should evaluate as an exact-match lookup. Source range: ${tableRange}; lookup key: ${lookupValue}; output column index: ${outputColumn}. Longer term, important lookups can be rebuilt as Quoin Reference Table or lookup Smart Cell logic for auditability, but promotion is not required for calculation.`
+        : `Excel VLOOKUP at ${address} needs review before Quoin can evaluate it. Source range: ${tableRange || "unknown"}; lookup key: ${lookupValue || "unknown"}; output column index: ${outputColumn || "unknown"}. ${omittedMatchMode ? "Excel omits the match-mode argument here, which defaults to approximate matching." : `Match mode is ${matchMode}.`} Quoin currently supports exact-match VLOOKUP only; change the fourth argument to FALSE if exact matching is intended, or rebuild the behavior as an explicit Reference Table rule.`,
+    });
+  }
+
+  for (const xlookup of findFunctionCalls(formula, "XLOOKUP")) {
+    const args = splitFormulaArguments(xlookup.args);
+    const lookupValue = args[0] ?? "";
+    const lookupRange = args[1] ?? "";
+    const returnRange = args[2] ?? "";
+    const matchMode = args[4] ?? "";
+    const exactMatch = matchMode.trim() === "" || matchMode.trim() === "0";
+
+    reviewItems.push({
+      severity: exactMatch ? "info" : "warning",
+      sheetName,
+      address,
+      formula: normalizeFormulaEntry(formula),
+      message: exactMatch
+        ? `Excel XLOOKUP at ${address} was preserved as a normal formula and should evaluate as an exact-match lookup. Lookup key: ${lookupValue}; lookup range: ${lookupRange}; return range: ${returnRange}. Longer term, important lookups can be rebuilt as Quoin Reference Table or lookup Smart Cell logic for auditability.`
+        : `Excel XLOOKUP at ${address} needs review before Quoin can evaluate it. Lookup key: ${lookupValue || "unknown"}; lookup range: ${lookupRange || "unknown"}; return range: ${returnRange || "unknown"}; match mode: ${matchMode}. Quoin currently supports exact-match XLOOKUP only; use match mode 0 if exact matching is intended.`,
     });
   }
 
   for (const functionName of functionNamesInFormula(formula)) {
-    if (supportedFormulaFunctions.has(functionName) || functionName === "VLOOKUP") continue;
+    if (supportedFormulaFunctions.has(functionName)) continue;
     const guidance = unsupportedFunctionGuidance(functionName);
     reviewItems.push({
       severity: guidance.severity,

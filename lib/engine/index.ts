@@ -303,13 +303,38 @@ function referencesForCell(cell: EngineCell): string[] {
   }
 
   if (cell.lookup) {
-    for (const ref of Object.values(cell.lookup.inputMap)) refs.add(ref);
+    for (const ref of Object.values(cell.lookup.inputMap)) {
+      for (const lookupRef of referencesForLookupInput(ref)) refs.add(lookupRef);
+    }
+  }
+
+  return [...refs];
+}
+
+function referencesForLookupInput(referenceOrExpression: string): string[] {
+  if (!referenceOrExpression.includes("&")) return [referenceOrExpression];
+  const refs = new Set<string>();
+
+  for (const part of splitConcatenationExpression(referenceOrExpression)) {
+    const trimmed = part.trim();
+    if (!trimmed || (trimmed.startsWith('"') && trimmed.endsWith('"'))) continue;
+    for (const ref of referencesForExpression(trimmed)) refs.add(ref);
   }
 
   return [...refs];
 }
 
 function referencesForExpression(expression: string): string[] {
+  const refs = new Set<string>();
+  for (const ref of referencesForLookupCalls(expression)) refs.add(ref);
+
+  const expressionWithoutLookups = replaceLookupCallsWithLiteral(expression, "0");
+  for (const ref of referencesForMathExpression(expressionWithoutLookups)) refs.add(ref);
+
+  return [...refs];
+}
+
+function referencesForMathExpression(expression: string): string[] {
   let node: MathNode;
   try {
     node = parseExpression(expression);
@@ -321,11 +346,44 @@ function referencesForExpression(expression: string): string[] {
   node.traverse((child) => {
     if (child.type !== "SymbolNode") return;
     const name = "name" in child ? String(child.name) : "";
-    if (!name || ALLOWED_FUNCTIONS.has(name) || name === "true" || name === "false") return;
+    if (!name || ALLOWED_FUNCTIONS.has(name) || ["true", "false", "TRUE", "FALSE"].includes(name)) return;
     refs.add(name);
   });
 
   return [...refs];
+}
+
+function referencesForLookupCalls(expression: string): string[] {
+  const refs = new Set<string>();
+
+  for (const call of findLookupFunctionCalls(expression)) {
+    if (call.name === "VLOOKUP") {
+      for (const ref of referencesForFormulaPart(call.args[0] ?? "")) refs.add(ref);
+      for (const ref of referencesForRangeArgument(call.args[1] ?? "")) refs.add(ref);
+    }
+
+    if (call.name === "XLOOKUP") {
+      for (const ref of referencesForFormulaPart(call.args[0] ?? "")) refs.add(ref);
+      for (const ref of referencesForRangeArgument(call.args[1] ?? "")) refs.add(ref);
+      for (const ref of referencesForRangeArgument(call.args[2] ?? "")) refs.add(ref);
+      if (call.args[3]) {
+        for (const ref of referencesForFormulaPart(call.args[3])) refs.add(ref);
+      }
+    }
+  }
+
+  return [...refs];
+}
+
+function referencesForFormulaPart(expression: string): string[] {
+  if (expression.includes("&")) return referencesForLookupInput(expression);
+  return referencesForMathExpression(expression);
+}
+
+function referencesForRangeArgument(expression: string): string[] {
+  const range = normalizeRangeReference(expression);
+  if (!range) return referencesForFormulaPart(expression);
+  return expandReferenceRange(range);
 }
 
 function evaluateCell(
@@ -347,7 +405,7 @@ function evaluateCell(
       errors.push(issue(cell, "Lookup cell is missing its lookup table definition."));
       return null;
     }
-    return evaluateLookup(cell, valuesById, indexes, errors);
+    return evaluateLookup(cell, valuesById, scope, indexes, errors);
   }
 
   if (cell.formula && (cell.role === "formula" || cell.role === "output" || cell.role === "action")) {
@@ -360,6 +418,7 @@ function evaluateCell(
 function evaluateLookup(
   cell: EngineCell,
   valuesById: Map<string, CellValue>,
+  scope: Record<string, CellValue>,
   indexes: ReturnType<typeof buildIndexes>,
   errors: EngineIssue[],
 ): CellValue {
@@ -368,8 +427,7 @@ function evaluateLookup(
 
   const matched = lookup.rows.find((row) => {
     return Object.entries(lookup.inputMap).every(([column, ref]) => {
-      const source = indexes.byReference.get(ref);
-      const actual = source ? valuesById.get(source.id) : undefined;
+      const actual = lookupInputValue(ref, valuesById, scope, indexes, cell, errors);
       return row[column] === actual;
     });
   });
@@ -377,8 +435,7 @@ function evaluateLookup(
   if (!matched) {
     const criteria = Object.entries(lookup.inputMap)
       .map(([column, ref]) => {
-        const source = indexes.byReference.get(ref);
-        const actual = source ? valuesById.get(source.id) : undefined;
+        const actual = lookupInputValue(ref, valuesById, scope, indexes, cell, errors);
         return `${column}=${String(actual ?? "")}`;
       })
       .join(", ");
@@ -389,6 +446,64 @@ function evaluateLookup(
   return matched[lookup.outputColumn] ?? null;
 }
 
+function lookupInputValue(
+  referenceOrExpression: string,
+  valuesById: Map<string, CellValue>,
+  scope: Record<string, CellValue>,
+  indexes: ReturnType<typeof buildIndexes>,
+  cell: EngineCell,
+  errors: EngineIssue[],
+): CellValue | undefined {
+  const source = indexes.byReference.get(referenceOrExpression);
+  if (source) return valuesById.get(source.id);
+  if (!referenceOrExpression.includes("&")) return undefined;
+  return evaluateConcatenationExpression(referenceOrExpression, scope, cell, errors);
+}
+
+function evaluateConcatenationExpression(
+  expression: string,
+  scope: Record<string, CellValue>,
+  cell: EngineCell,
+  errors: EngineIssue[],
+): CellValue | undefined {
+  const parts = splitConcatenationExpression(expression);
+  if (parts.length <= 1) return undefined;
+
+  return parts.map((part) => {
+    const trimmed = part.trim();
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) return trimmed.slice(1, -1).replace(/""/g, '"');
+    if (trimmed in scope) return String(scope[trimmed] ?? "");
+    const value = evaluateExpression(trimmed, scope, cell, errors);
+    return String(value ?? "");
+  }).join("");
+}
+
+function splitConcatenationExpression(expression: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  let inString = false;
+
+  for (const char of expression) {
+    if (char === '"') {
+      inString = !inString;
+      current += char;
+      continue;
+    }
+    if (!inString && char === "(") depth += 1;
+    if (!inString && char === ")") depth -= 1;
+    if (!inString && depth === 0 && char === "&") {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  parts.push(current);
+  return parts;
+}
+
 function evaluateExpression(
   expression: string,
   scope: Record<string, CellValue>,
@@ -396,9 +511,10 @@ function evaluateExpression(
   errors: EngineIssue[],
 ): CellValue {
   try {
-    const node = parseExpression(expression);
+    const expressionWithLookupValues = replaceLookupCallsWithValues(expression, scope, cell, errors);
+    const node = parseExpression(expressionWithLookupValues);
     const expressionScope = { ...scope };
-    for (const ref of referencesForExpression(expression)) {
+    for (const ref of referencesForExpression(expressionWithLookupValues)) {
       if ((isCellReference(ref) || isScopedCellReference(ref)) && !(ref in expressionScope)) expressionScope[ref] = 0;
     }
     const result = node.evaluate(expressionScope);
@@ -407,6 +523,210 @@ function evaluateExpression(
     errors.push(issue(cell, `Formula error: ${(error as Error).message}`));
     return null;
   }
+}
+
+function replaceLookupCallsWithValues(
+  expression: string,
+  scope: Record<string, CellValue>,
+  cell: EngineCell,
+  errors: EngineIssue[],
+): string {
+  const calls = findLookupFunctionCalls(expression);
+  if (calls.length === 0) return expression;
+
+  let next = expression;
+  for (const call of [...calls].reverse()) {
+    const value = evaluateLookupFunction(call.name, call.args, scope, cell, errors);
+    next = `${next.slice(0, call.start)}${literalForFormula(value)}${next.slice(call.end + 1)}`;
+  }
+  return next;
+}
+
+function replaceLookupCallsWithLiteral(expression: string, literal: string): string {
+  const calls = findLookupFunctionCalls(expression);
+  if (calls.length === 0) return expression;
+
+  let next = expression;
+  for (const call of [...calls].reverse()) {
+    next = `${next.slice(0, call.start)}${literal}${next.slice(call.end + 1)}`;
+  }
+  return next;
+}
+
+function evaluateLookupFunction(
+  name: string,
+  args: string[],
+  scope: Record<string, CellValue>,
+  cell: EngineCell,
+  errors: EngineIssue[],
+): CellValue {
+  if (name === "VLOOKUP") return evaluateVlookupFunction(args, scope, cell, errors);
+  if (name === "XLOOKUP") return evaluateXlookupFunction(args, scope, cell, errors);
+  return null;
+}
+
+function evaluateVlookupFunction(
+  args: string[],
+  scope: Record<string, CellValue>,
+  cell: EngineCell,
+  errors: EngineIssue[],
+): CellValue {
+  if (args.length < 3) throw new Error("VLOOKUP requires lookup value, table range, and output column.");
+  const lookupValue = evaluateLookupArgument(args[0], scope, cell, errors);
+  const table = rangeValues(args[1], scope);
+  const outputColumn = Math.trunc(toNumber(evaluateLookupArgument(args[2], scope, cell, errors)) ?? 0);
+  const rangeLookup = args[3] ? evaluateLookupArgument(args[3], scope, cell, errors) : true;
+
+  if (rangeLookup !== false && rangeLookup !== 0 && String(rangeLookup).toLowerCase() !== "false") {
+    throw new Error("VLOOKUP approximate matching is not supported yet; use FALSE for exact match.");
+  }
+
+  if (outputColumn < 1) throw new Error("VLOOKUP output column must be 1 or greater.");
+
+  for (const row of table) {
+    if (lookupMatches(row[0], lookupValue)) return row[outputColumn - 1] ?? null;
+  }
+
+  throw new Error(`VLOOKUP did not find a matching row for ${String(lookupValue ?? "")}.`);
+}
+
+function evaluateXlookupFunction(
+  args: string[],
+  scope: Record<string, CellValue>,
+  cell: EngineCell,
+  errors: EngineIssue[],
+): CellValue {
+  if (args.length < 3) throw new Error("XLOOKUP requires lookup value, lookup range, and return range.");
+  const lookupValue = evaluateLookupArgument(args[0], scope, cell, errors);
+  const lookupValues = rangeValues(args[1], scope).flat();
+  const returnValues = rangeValues(args[2], scope).flat();
+  const ifNotFound = args[3];
+  const matchMode = args[4] ? evaluateLookupArgument(args[4], scope, cell, errors) : 0;
+
+  if (matchMode !== 0 && String(matchMode).toLowerCase() !== "0") {
+    throw new Error("XLOOKUP only supports exact match mode 0 right now.");
+  }
+
+  for (let index = 0; index < lookupValues.length; index += 1) {
+    if (lookupMatches(lookupValues[index], lookupValue)) return returnValues[index] ?? null;
+  }
+
+  if (ifNotFound !== undefined && ifNotFound !== "") return evaluateLookupArgument(ifNotFound, scope, cell, errors);
+  throw new Error(`XLOOKUP did not find a matching row for ${String(lookupValue ?? "")}.`);
+}
+
+function evaluateLookupArgument(
+  expression: string,
+  scope: Record<string, CellValue>,
+  cell: EngineCell,
+  errors: EngineIssue[],
+): CellValue {
+  const trimmed = expression.trim();
+  if (/^true$/i.test(trimmed)) return true;
+  if (/^false$/i.test(trimmed)) return false;
+  if (expression.includes("&")) return evaluateConcatenationExpression(expression, scope, cell, errors) ?? null;
+  return evaluateExpression(expression, scope, cell, errors);
+}
+
+function rangeValues(expression: string, scope: Record<string, CellValue>): CellValue[][] {
+  const range = normalizeRangeReference(expression);
+  if (!range) throw new Error(`Lookup range "${expression}" is not a supported cell range.`);
+  const refs = expandReferenceRange(range);
+  const bounds = referenceRangeBounds(range);
+  if (!bounds) return [];
+
+  const rows: CellValue[][] = [];
+  let index = 0;
+  for (let row = bounds.firstRow; row <= bounds.lastRow; row += 1) {
+    const values: CellValue[] = [];
+    for (let column = bounds.firstColumn; column <= bounds.lastColumn; column += 1) {
+      values.push(scope[refs[index]] ?? null);
+      index += 1;
+    }
+    rows.push(values);
+  }
+  return rows;
+}
+
+function lookupMatches(left: CellValue, right: CellValue): boolean {
+  if (left === right) return true;
+  if (left === null || right === null) return false;
+  return String(left) === String(right);
+}
+
+function literalForFormula(value: CellValue): string {
+  if (value === null) return "null";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function findLookupFunctionCalls(expression: string): Array<{ name: string; args: string[]; start: number; end: number }> {
+  const calls: Array<{ name: string; args: string[]; start: number; end: number }> = [];
+  const pattern = /\b(VLOOKUP|XLOOKUP)\s*\(/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(expression))) {
+    const openIndex = match.index + match[0].lastIndexOf("(");
+    const closeIndex = matchingParenIndex(expression, openIndex);
+    if (closeIndex === null) continue;
+    calls.push({
+      name: match[1].toUpperCase(),
+      args: splitFormulaArguments(expression.slice(openIndex + 1, closeIndex)),
+      start: match.index,
+      end: closeIndex,
+    });
+    pattern.lastIndex = closeIndex + 1;
+  }
+
+  return calls;
+}
+
+function matchingParenIndex(value: string, openIndex: number): number | null {
+  let depth = 0;
+  let inString = false;
+
+  for (let index = openIndex; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "(") depth += 1;
+    if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+
+  return null;
+}
+
+function splitFormulaArguments(args: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  let inString = false;
+
+  for (const char of args) {
+    if (char === '"') {
+      inString = !inString;
+      current += char;
+      continue;
+    }
+    if (!inString && char === "(") depth += 1;
+    if (!inString && char === ")") depth -= 1;
+    if (!inString && depth === 0 && char === ",") {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  parts.push(current.trim());
+  return parts;
 }
 
 function parseExpression(expression: string): MathNode {
@@ -463,9 +783,12 @@ function normalizeExpression(expression: string): string {
 }
 
 function expandCellRanges(expression: string): string {
-  return expression.replace(/\b([A-Z]+[1-9]\d*)\s*:\s*([A-Z]+[1-9]\d*)\b/gi, (_match, start: string, end: string) => {
-    return expandRange(start.toUpperCase(), end.toUpperCase()).join(", ");
-  });
+  return expression.replace(
+    /\b((?:__sheet\d+_)?[A-Z]+[1-9]\d*)\s*:\s*((?:__sheet\d+_)?[A-Z]+[1-9]\d*)\b/gi,
+    (_match, start: string, end: string) => {
+      return expandReferenceRange(`${start}:${end}`).join(", ");
+    },
+  );
 }
 
 function expandRange(start: string, end: string): string[] {
@@ -488,6 +811,50 @@ function expandRange(start: string, end: string): string[] {
   return references;
 }
 
+function normalizeRangeReference(expression: string): string | null {
+  const normalized = expression.trim().replace(/^=/, "").replace(/\$/g, "");
+  const match = /^((?:__sheet\d+_)?[A-Z]+[1-9]\d*)\s*:\s*((?:__sheet\d+_)?[A-Z]+[1-9]\d*)$/i.exec(normalized);
+  if (!match) return null;
+  return `${match[1].toUpperCase()}:${match[2].toUpperCase()}`;
+}
+
+function expandReferenceRange(range: string): string[] {
+  const bounds = referenceRangeBounds(range);
+  if (!bounds) return [];
+  const refs: string[] = [];
+
+  for (let row = bounds.firstRow; row <= bounds.lastRow; row += 1) {
+    for (let column = bounds.firstColumn; column <= bounds.lastColumn; column += 1) {
+      refs.push(`${bounds.scopePrefix}${columnName(column)}${row}`);
+    }
+  }
+
+  return refs;
+}
+
+function referenceRangeBounds(range: string): {
+  scopePrefix: string;
+  firstColumn: number;
+  lastColumn: number;
+  firstRow: number;
+  lastRow: number;
+} | null {
+  const normalized = normalizeRangeReference(range);
+  if (!normalized) return null;
+  const [start, end] = normalized.split(":");
+  const startRef = parseAnyCellReference(start);
+  const endRef = parseAnyCellReference(end);
+  if (!startRef || !endRef || startRef.scopePrefix !== endRef.scopePrefix) return null;
+
+  return {
+    scopePrefix: startRef.scopePrefix,
+    firstColumn: Math.min(startRef.column, endRef.column),
+    lastColumn: Math.max(startRef.column, endRef.column),
+    firstRow: Math.min(startRef.row, endRef.row),
+    lastRow: Math.max(startRef.row, endRef.row),
+  };
+}
+
 function parseCellReference(reference: string): { column: number; row: number } | null {
   const match = /^([A-Z]+)([1-9]\d*)$/.exec(reference);
   if (!match) return null;
@@ -495,6 +862,20 @@ function parseCellReference(reference: string): { column: number; row: number } 
     column: columnNumber(match[1]),
     row: Number(match[2]),
   };
+}
+
+function parseAnyCellReference(reference: string): { scopePrefix: string; column: number; row: number } | null {
+  const scoped = /^(__sheet\d+_)([A-Z]+)([1-9]\d*)$/i.exec(reference);
+  if (scoped) {
+    return {
+      scopePrefix: scoped[1].toLowerCase(),
+      column: columnNumber(scoped[2].toUpperCase()),
+      row: Number(scoped[3]),
+    };
+  }
+
+  const plain = parseCellReference(reference.toUpperCase());
+  return plain ? { scopePrefix: "", column: plain.column, row: plain.row } : null;
 }
 
 function isCellReference(reference: string): boolean {
@@ -711,7 +1092,7 @@ function transformWorkbookExpression(
   next = next.replace(
     /\b\$?([A-Z]+)\$?([1-9]\d*)\s*:\s*\$?([A-Z]+)\$?([1-9]\d*)\b/g,
     (_match, startColumn: string, startRow: string, endColumn: string, endRow: string) => {
-      return expandWorkbookRange(currentSheetIndex, `${startColumn}${startRow}`, `${endColumn}${endRow}`).join(", ");
+      return scopedRange(currentSheetIndex, `${startColumn}${startRow}`, `${endColumn}${endRow}`);
     },
   );
 
@@ -740,11 +1121,11 @@ function scopedRangeForSheet(
 ): string | null {
   const matched = sheetLookup.get(normalizeSheetName(sheetName));
   if (!matched) return null;
-  return expandWorkbookRange(matched.index, start, end).join(", ");
+  return scopedRange(matched.index, start, end);
 }
 
-function expandWorkbookRange(sheetIndex: number, start: string, end: string): string[] {
-  return expandRange(normalizeAddress(start), normalizeAddress(end)).map((address) => scopedAddress(sheetIndex, address));
+function scopedRange(sheetIndex: number, start: string, end: string): string {
+  return `${scopedAddress(sheetIndex, start)}:${scopedAddress(sheetIndex, end)}`;
 }
 
 function unescapeSheetName(name: string): string {

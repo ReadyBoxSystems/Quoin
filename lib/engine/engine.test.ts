@@ -133,6 +133,71 @@ test("evaluates ROUNDUP formulas", () => {
   assertEq(result.outputs.decimal, 12.35, "ROUNDUP should honor decimal places");
 });
 
+test("evaluates exact VLOOKUP formulas as calculation primitives", () => {
+  const result = executeEngine({
+    cells: [
+      cell({ id: "lookup", address: "A1", role: "input", type: "text", value: "K2" }),
+      cell({ id: "key1", address: "B1", role: "input", type: "text", value: "K1" }),
+      cell({ id: "value1", address: "C1", role: "input", type: "text", value: "First" }),
+      cell({ id: "key2", address: "B2", role: "input", type: "text", value: "K2" }),
+      cell({ id: "value2", address: "C2", role: "input", type: "text", value: "Second" }),
+      cell({ id: "result", address: "D1", name: "lookup_result", role: "output", type: "text", formula: "VLOOKUP(A1,B1:C2,2,FALSE)", surfaced: true }),
+    ],
+  });
+
+  assertEq(result.valid, true, "VLOOKUP should be valid");
+  assertEq(result.outputs.lookup_result, "Second", "VLOOKUP should return the matching output column");
+});
+
+test("evaluates VLOOKUP formulas with Excel-style concatenated helper keys", () => {
+  const result = executeEngine({
+    cells: [
+      cell({ id: "year", address: "A1", role: "input", value: 2018 }),
+      cell({ id: "span", address: "B1", role: "input", value: 27.5 }),
+      cell({ id: "key1", address: "C1", role: "input", type: "text", value: "2018|27.5" }),
+      cell({ id: "value1", address: "D1", role: "input", type: "text", value: "2x10" }),
+      cell({ id: "key2", address: "C2", role: "input", type: "text", value: "2018|30" }),
+      cell({ id: "value2", address: "D2", role: "input", type: "text", value: "2x12" }),
+      cell({ id: "result", address: "E1", name: "beam", role: "output", type: "text", formula: 'VLOOKUP(A1&"|"&B1,C1:D2,2,FALSE)', surfaced: true }),
+    ],
+  });
+
+  assertEq(result.valid, true, "helper-key VLOOKUP should be valid");
+  assertEq(result.outputs.beam, "2x10", "VLOOKUP should match the concatenated helper key");
+});
+
+test("evaluates exact XLOOKUP formulas as calculation primitives", () => {
+  const result = executeEngine({
+    cells: [
+      cell({ id: "lookup", address: "A1", role: "input", type: "text", value: "K2" }),
+      cell({ id: "key1", address: "B1", role: "input", type: "text", value: "K1" }),
+      cell({ id: "key2", address: "B2", role: "input", type: "text", value: "K2" }),
+      cell({ id: "value1", address: "C1", role: "input", type: "text", value: "First" }),
+      cell({ id: "value2", address: "C2", role: "input", type: "text", value: "Second" }),
+      cell({ id: "result", address: "D1", name: "lookup_result", role: "output", type: "text", formula: 'XLOOKUP(A1,B1:B2,C1:C2,"Missing")', surfaced: true }),
+    ],
+  });
+
+  assertEq(result.valid, true, "XLOOKUP should be valid");
+  assertEq(result.outputs.lookup_result, "Second", "XLOOKUP should return the matching return value");
+});
+
+test("allows lookup formulas inside larger expressions", () => {
+  const result = executeEngine({
+    cells: [
+      cell({ id: "lookup", address: "A1", role: "input", type: "text", value: "K2" }),
+      cell({ id: "key1", address: "B1", role: "input", type: "text", value: "K1" }),
+      cell({ id: "value1", address: "C1", role: "input", value: 10 }),
+      cell({ id: "key2", address: "B2", role: "input", type: "text", value: "K2" }),
+      cell({ id: "value2", address: "C2", role: "input", value: 20 }),
+      cell({ id: "result", address: "D1", name: "doubled", role: "output", formula: "VLOOKUP(A1,B1:C2,2,FALSE) * 2", surfaced: true }),
+    ],
+  });
+
+  assertEq(result.valid, true, "compound VLOOKUP expression should be valid");
+  assertEq(result.outputs.doubled, 40, "lookup result should participate in arithmetic");
+});
+
 test("surfaces action outputs", () => {
   const result = executeEngine({
     cells: [
@@ -194,6 +259,34 @@ test("executes lookup tables", () => {
 
   assertEq(result.valid, true, "lookup should be valid");
   assertEq(result.outputs.beam_size, "2x10", "lookup should return matching output");
+});
+
+test("executes lookup tables with Excel-style concatenated helper keys", () => {
+  const result = executeEngine({
+    cells: [
+      cell({ id: "year", address: "A1", name: "year", role: "input", value: 2018 }),
+      cell({ id: "span", address: "B1", name: "span", role: "input", value: 27.5 }),
+      cell({
+        id: "beam",
+        address: "C1",
+        name: "beam_size",
+        role: "lookup",
+        type: "text",
+        surfaced: true,
+        lookup: {
+          inputMap: { lookup_key: 'year&"|"&span' },
+          outputColumn: "beam",
+          rows: [
+            { lookup_key: "2018|27.5", beam: "2x10" },
+            { lookup_key: "2018|30", beam: "2x12" },
+          ],
+        },
+      }),
+    ],
+  });
+
+  assertEq(result.valid, true, "helper-key lookup should be valid");
+  assertEq(result.outputs.beam_size, "2x10", "lookup should match the concatenated helper key");
 });
 
 test("preserves resolved values when a lookup misses", () => {
@@ -360,6 +453,36 @@ test("evaluates quoted sheet names with spaces", () => {
 
   assertEq(result.valid, true, "quoted sheet name formula should be valid");
   assertEq(result.outputs["Calc Sheet!total"], 24, "quoted sheet name formula should evaluate");
+});
+
+test("evaluates workbook cross-sheet VLOOKUP and XLOOKUP ranges", () => {
+  const result = executeWorkbookEngine({
+    sheets: [
+      {
+        id: "calculator",
+        name: "Calculator",
+        cells: [
+          cell({ id: "A1", address: "A1", name: "lookup_key", role: "input", type: "text", value: "K2" }),
+          cell({ id: "B1", address: "B1", name: "vlookup_result", role: "output", type: "text", formula: "VLOOKUP(A1,'Reference Data'!A1:B2,2,FALSE)", surfaced: true }),
+          cell({ id: "B2", address: "B2", name: "xlookup_result", role: "output", type: "text", formula: "XLOOKUP(A1,'Reference Data'!A1:A2,'Reference Data'!B1:B2)", surfaced: true }),
+        ],
+      },
+      {
+        id: "reference",
+        name: "Reference Data",
+        cells: [
+          cell({ id: "A1", address: "A1", role: "input", type: "text", value: "K1" }),
+          cell({ id: "B1", address: "B1", role: "input", type: "text", value: "First" }),
+          cell({ id: "A2", address: "A2", role: "input", type: "text", value: "K2" }),
+          cell({ id: "B2", address: "B2", role: "input", type: "text", value: "Second" }),
+        ],
+      },
+    ],
+  });
+
+  assertEq(result.valid, true, "workbook lookup formulas should be valid");
+  assertEq(result.outputs["Calculator!vlookup_result"], "Second", "cross-sheet VLOOKUP should evaluate");
+  assertEq(result.outputs["Calculator!xlookup_result"], "Second", "cross-sheet XLOOKUP should evaluate");
 });
 
 test("reports duplicate workbook smart cell names", () => {
