@@ -14,8 +14,8 @@ The local working branch is `main`, tracking `origin/main`. The first pushed bas
 
 Current Git state as of July 17, 2026:
 
-- `origin/main` and local `main` are aligned at `b5162ef` (`Archive import fixtures and update planning docs`).
-- The preceding pushed commit is `2dcded4` (`Support lookup formulas as calculation primitives`).
+- `origin/main` and local `main` are aligned.
+- Recent pushed commits include `b5162ef` (`Archive import fixtures and update planning docs`) and `2dcded4` (`Support lookup formulas as calculation primitives`).
 - Completed importer planning notes, manual test notes, and generated workbook fixtures are archived under `docs/archive/import-testing/`.
 
 The prototype has the right core shape:
