@@ -1059,7 +1059,7 @@ export function VariableSheet() {
             onChange={handleImportFileChange}
           />
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
-            {isImporting ? "Importing..." : "Import Excel"}
+            {isImporting ? "Importing..." : "Import Workbook"}
           </button>
           <button type="button" onClick={undoCells} disabled={undoStack.length === 0}>Undo</button>
           <button type="button" onClick={redoCells} disabled={redoStack.length === 0}>Redo</button>
@@ -1079,10 +1079,10 @@ export function VariableSheet() {
       </header>
 
       {(pendingImport || importError) && (
-        <section className="importPanel" aria-label="Excel import">
+        <section className="importPanel" aria-label="Workbook import">
           <div className="importPanelHeader">
             <div>
-              <p className="eyebrow">Excel Import</p>
+              <p className="eyebrow">Workbook Import</p>
               <h2>{pendingImport ? pendingImport.fileName : "Import Status"}</h2>
             </div>
             {pendingImport && (
@@ -1754,7 +1754,7 @@ function HelpPanel() {
       <div className="helpGrid">
         <article>
           <h3>Core Idea</h3>
-          <p>Quoin should feel familiar to anyone who has used Excel: cells have coordinates, formulas can reference other cells, and imported workbooks keep their Sheet structure. The difference is that named cells can carry metadata, controls, runner labels, validation, and review behavior.</p>
+          <p>Quoin should feel familiar to anyone who has used spreadsheets: cells have coordinates, formulas can reference other cells, and imported workbooks keep their Sheet structure. The difference is that named cells can carry metadata, controls, runner labels, validation, and review behavior.</p>
           <p>The authoring grid is still the source of truth. Build and import calculator logic first, prove the math, then promote the important cells into Smart Cells for runner-facing workflow behavior.</p>
         </article>
 
@@ -1764,7 +1764,7 @@ function HelpPanel() {
           <ul>
             <li>Type directly in a selected cell, double-click a cell, press Enter, or use the formula bar.</li>
             <li>Use Delete or Backspace to clear the selected cell.</li>
-            <li>Paste tabular data from Excel into the grid.</li>
+            <li>Paste tabular data from a spreadsheet into the grid.</li>
           </ul>
         </article>
 
@@ -1776,7 +1776,7 @@ function HelpPanel() {
             <li>Formulas on any Sheet can reference a unique Smart Cell name directly.</li>
             <li>Metadata stays in the inspector so the grid remains spreadsheet-first.</li>
             <li>Naming a cell does not automatically show it to the runner. Turn on Surface to runner when the cell belongs in Runner Preview.</li>
-            <li>Imported Excel dropdown cells are the exception: supported dropdown inputs are surfaced automatically so the imported control remains visible where it is used.</li>
+            <li>Imported workbook dropdown cells are the exception: supported dropdown inputs are surfaced automatically so the imported control remains visible where it is used.</li>
           </ul>
         </article>
 
@@ -1814,14 +1814,14 @@ function HelpPanel() {
             <li>Dropdowns render directly in the grid.</li>
             <li>The same dropdown options render in Runner Preview.</li>
             <li>Use Display Label to make runner fields readable without changing formula names.</li>
-            <li>Imported Excel cells with simple typed lists or same-workbook range lists are snapshotted into embedded dropdown options.</li>
+            <li>Imported workbook cells with simple typed lists or same-workbook range lists are snapshotted into embedded dropdown options.</li>
             <li>Longer option sets should eventually use live visible reference data, named ranges, tables, or CSV-ingested datasets.</li>
           </ul>
         </article>
 
         <article className="helpFormulaReference">
           <h3>Supported Formulas</h3>
-          <p>Quoin supports an Excel-compatible subset for common calculator logic. A formula starts with <code>=</code>. The engine evaluates references, ranges, arithmetic, comparisons, common functions, and <code>IF</code>. Unsupported imported formulas stay visible and appear as review items instead of being silently dropped.</p>
+          <p>Quoin supports a spreadsheet-compatible subset for common calculator logic. A formula starts with <code>=</code>. The engine evaluates references, ranges, arithmetic, comparisons, common functions, and <code>IF</code>. Unsupported imported formulas stay visible and appear as review items instead of being silently dropped.</p>
           <h4>References</h4>
           <p>A reference points a formula at another cell or Smart Cell. Coordinate references use the grid address. Smart Cell references use the workbook-scoped Smart Cell Name.</p>
           <ul>
@@ -1846,14 +1846,23 @@ function HelpPanel() {
             <li><code>=SUM(Loads!B3:B5)</code> can aggregate a supported range from another Sheet.</li>
           </ul>
           <h4>Functions</h4>
-          <p>Functions perform named operations. Quoin accepts familiar uppercase Excel-style names and maps them to deterministic engine behavior.</p>
+          <p>Functions perform named operations. Quoin accepts familiar uppercase spreadsheet function names and maps them to deterministic engine behavior.</p>
           <ul>
             <li><code>=SUM(A1:A5)</code> adds values.</li>
             <li><code>=AVERAGE(A1:A5)</code> calculates the mean.</li>
             <li><code>=MIN(A1:A5)</code> and <code>=MAX(A1:A5)</code> find bounds.</li>
             <li><code>=ROUND(B6, 2)</code> rounds to two decimal places.</li>
-            <li><code>=ROUNDUP(B6, 0)</code> rounds away from zero, matching the common Excel calculator pattern.</li>
+            <li><code>=ROUNDUP(B6, 0)</code> rounds away from zero, matching a common calculator pattern.</li>
             <li><code>=ABS(B2)</code>, <code>=SQRT(B2)</code>, <code>=CEIL(B2)</code>, and <code>=FLOOR(B2)</code> cover common numeric cleanup.</li>
+          </ul>
+          <h4>Lookup Formulas</h4>
+          <p><code>VLOOKUP</code> and <code>XLOOKUP</code> are calculation primitives in Quoin. A lookup formula can live in a normal coordinate cell, just like other spreadsheet formulas. You do not have to promote the cell to a lookup Smart Cell just to make the formula calculate.</p>
+          <ul>
+            <li><code>=VLOOKUP(A1,Data!A1:B200,2,FALSE)</code> finds an exact match in the first column of the table range and returns the requested output column.</li>
+            <li><code>=VLOOKUP(A1&amp;"|"&amp;B1,'Beam Data'!F2:G9999,2,FALSE)</code> supports common helper-key patterns used by imported calculators.</li>
+            <li><code>=XLOOKUP(A1,Data!A1:A200,Data!B1:B200)</code> finds an exact match in the lookup range and returns the matching value from the return range.</li>
+            <li>Lookup formulas can participate in larger formulas, such as <code>=VLOOKUP(A1,Data!A1:B20,2,FALSE)*2</code>.</li>
+            <li>Quoin currently supports exact-match lookup behavior. Approximate <code>VLOOKUP</code> and non-exact <code>XLOOKUP</code> match modes are preserved for review.</li>
           </ul>
           <h4>Conditions And IF</h4>
           <p>Comparisons return true or false. <code>IF</code> chooses one value when the condition is true and another value when it is false.</p>
@@ -1864,6 +1873,7 @@ function HelpPanel() {
             <li><code>=IF(total_line_load&gt;9000, "engineering review", "standard")</code> returns runner-readable text.</li>
           </ul>
           <p>Supported aliases include SUM, AVERAGE, MAX, MIN, ROUND, ROUNDUP, ABS, SQRT, CEIL, and FLOOR.</p>
+          <p>Supported lookup functions include exact-match <code>VLOOKUP</code> and exact-match <code>XLOOKUP</code>. These are formula features, not Smart Cell requirements.</p>
           <h4>Formula Editing Notes</h4>
           <ul>
             <li>While typing a formula, the reference popup suggests named Smart Cells and populated coordinates.</li>
@@ -1912,11 +1922,11 @@ function HelpPanel() {
 
         <article>
           <h3>Lookup Cells</h3>
-          <p>Lookup Smart Cells can match one or more input criteria against the embedded lookup table editor. The current editor is a prototype shortcut for small examples; the longer-term product direction is first-class Reference Tables or CSV-ingested datasets.</p>
+          <p>Lookup Smart Cells are a Quoin-native way to expose and audit a lookup table, but they are not required for spreadsheet lookup formulas. Use normal formulas for calculator compatibility. Use lookup Smart Cells only when the lookup itself needs named inputs, editable criteria, runner visibility, or clearer audit structure.</p>
           <ul>
             <li>Use criteria columns to match input Smart Cell names.</li>
             <li>Choose an output column to return the lookup result.</li>
-            <li>Paste tabular data from Excel into the lookup table editor.</li>
+            <li>Paste tabular data from a spreadsheet into the lookup table editor.</li>
             <li>A lookup miss shows <code>#ERR</code> so missing data is visible.</li>
             <li>Do not use the embedded lookup editor for thousands of rows. Large imported data Sheets should become Reference Tables in a later workflow.</li>
           </ul>
@@ -1924,34 +1934,36 @@ function HelpPanel() {
 
         <article>
           <h3>Reference Data Direction</h3>
-          <p>Real shop calculators often use large data tabs and Excel lookup formulas. Quoin now calls out likely reference-data Sheets during import so the admin can tell the difference between a calculator Sheet and a data Sheet.</p>
+          <p>Real shop calculators often use large data tabs and lookup formulas. Quoin now calls out likely reference-data Sheets during import so the admin can tell the difference between a calculator Sheet and a data Sheet.</p>
           <ul>
             <li>A large Sheet with many rows and no formulas is preserved as a normal Sheet for now and marked as likely reference data.</li>
-            <li>Exact-match Excel <code>VLOOKUP</code> formulas are preserved, but review items explain the source range, lookup key, output column, and Reference Table repair path.</li>
-            <li>Quoin should eventually bind these formulas to visible/imported Reference Tables instead of hiding thousands of rows inside Smart Cell metadata.</li>
+            <li>Exact-match <code>VLOOKUP</code> and <code>XLOOKUP</code> formulas are preserved as normal formulas and should calculate without Smart Cell promotion.</li>
+            <li>Review items can still explain lookup source ranges and keys so important lookups can later be rebuilt as visible Reference Tables or audited lookup Smart Cells.</li>
+            <li>Quoin should eventually bind large lookup formulas to visible/imported Reference Tables instead of hiding thousands of rows inside Smart Cell metadata.</li>
             <li>Runner Preview should show surfaced inputs and results, not raw reference-data rows.</li>
           </ul>
         </article>
 
         <article>
-          <h3>Excel Import</h3>
-          <p>Import Excel brings an <code>.xlsx</code> calculator into a new browser-local configuration. The goal is to preserve the workbook calculation surface first, then let you structure it with Quoin Smart Cells.</p>
+          <h3>Workbook Import</h3>
+          <p>Import Workbook brings an <code>.xlsx</code> calculator into a new browser-local configuration. The goal is to preserve the workbook calculation surface first, then let you structure it with Quoin Smart Cells.</p>
           <ul>
             <li>Workbook Sheets, values, and formulas are preserved.</li>
             <li>Safe workbook-defined single-cell names can become Smart Cell names.</li>
-            <li>Simple Excel data-validation lists and supported workbook range sources can become dropdown options on imported input Smart Cells.</li>
+            <li>Simple workbook list validations and supported workbook range sources can become dropdown options on imported input Smart Cells.</li>
             <li>Dropdown-only cells still expand the imported Sheet bounds, so controls outside the normal used range remain visible.</li>
             <li>Merged ranges, named ranges, external workbook links, structured table references, spill markers, and other risky features appear as review items.</li>
             <li>Unsupported formulas remain visible instead of being silently dropped.</li>
-            <li>Review items try to explain the repair path, such as converting an exact-match <code>VLOOKUP</code> into a Reference Table lookup or replacing <code>INDIRECT</code> with direct references.</li>
+            <li>Review items try to explain the repair path, such as changing approximate lookup behavior to explicit exact-match logic or replacing <code>INDIRECT</code> with direct references.</li>
           </ul>
         </article>
 
         <article>
           <h3>Formula Review Items</h3>
-          <p>Imported Excel formulas are classified conservatively. Quoin supports the common subset it can evaluate deterministically and preserves the rest for review.</p>
+          <p>Imported workbook formulas are classified conservatively. Quoin supports the common subset it can evaluate deterministically and preserves the rest for review.</p>
           <ul>
-            <li><code>VLOOKUP</code>: exact-match lookups should become Reference Table lookups. Approximate or omitted match-mode lookups need manual confirmation.</li>
+            <li><code>VLOOKUP</code>: exact-match lookups are supported as formulas. Approximate or omitted match-mode lookups need manual confirmation because omitted match mode is often approximate in spreadsheet tools.</li>
+            <li><code>XLOOKUP</code>: exact-match lookups are supported as formulas. Non-exact match modes need manual confirmation.</li>
             <li><code>IFERROR</code> and <code>IFNA</code>: decide what fallback is safe, then model it with explicit <code>IF</code>, validation, or review messaging.</li>
             <li><code>INDIRECT</code> and <code>OFFSET</code>: replace dynamic address logic with direct references or a Reference Table selection.</li>
             <li><code>SUMIFS</code>, <code>COUNTIFS</code>, and similar criteria formulas: move the criteria ranges into a Reference Table or helper calculation before modeling the aggregate.</li>
@@ -1960,8 +1972,20 @@ function HelpPanel() {
         </article>
 
         <article>
+          <h3>Patch Notes</h3>
+          <p>Recent prototype changes are tracked here so testing can focus on what changed.</p>
+          <ul>
+            <li><strong>Lookup formulas:</strong> <code>VLOOKUP</code> and <code>XLOOKUP</code> now calculate as normal formulas. A lookup is a calculation primitive, not a structural decision.</li>
+            <li><strong>Exact-match support:</strong> Quoin supports exact-match <code>VLOOKUP(...,FALSE)</code>, <code>VLOOKUP(...,0)</code>, and default/exact <code>XLOOKUP</code> behavior.</li>
+            <li><strong>Helper keys:</strong> Imported formulas using concatenated keys such as <code>A1&amp;"|"&amp;B1</code> can evaluate against preserved reference-data Sheets.</li>
+            <li><strong>Import behavior:</strong> Lookup formulas stay as formula cells instead of being converted into lookup Smart Cells. Review items now point out when lookup behavior needs confirmation.</li>
+            <li><strong>Reference data:</strong> Large data tabs remain visible as Sheets for now. Future Reference Tables should make those data sources easier to audit and bind.</li>
+          </ul>
+        </article>
+
+        <article>
           <h3>Local Configurations</h3>
-          <p>Configurations are stored in this browser for now. New, Save, Duplicate, Delete, rename, Load Demo, and Import Excel all operate locally. Database-backed publishing, execution records, auth, and audit reports are later phases.</p>
+          <p>Configurations are stored in this browser for now. New, Save, Duplicate, Delete, rename, Load Demo, and Import Workbook all operate locally. Database-backed publishing, execution records, auth, and audit reports are later phases.</p>
         </article>
 
         <article>

@@ -1,0 +1,152 @@
+# AGENTS.md
+
+## Project
+
+Quoin is being rebuilt cleanly in this folder as a "better Excel" for structured shop knowledge.
+
+The product direction is:
+
+- Start with an Excel-familiar grid.
+- Normal coordinate cells should work first.
+- Excel-familiar behavior matters for demos: range formulas, `IF`, undo/redo, formula-aware copy/fill, paste-friendly lookup tables, row/column controls, and dependency tracing should keep working.
+- Common lookup formulas are part of normal spreadsheet compatibility. Exact-match `VLOOKUP` and exact/default `XLOOKUP` should calculate in normal formula cells; a lookup Smart Cell is not required just to make an imported calculator work.
+- Naming a cell promotes it to a Smart Cell.
+- Smart Cells can have role, type, display label, annotation, runner surfacing, lookup behavior, action output behavior, and rule behavior.
+- Smart Cells with configured dropdown options should render as dropdowns in both the grid and Runner Preview.
+- Imported Excel dropdown cells with supported data-validation list sources should become surfaced input Smart Cells with embedded dropdown options.
+- Smart Cell names are workbook-scoped when unique; formulas on any Sheet can reference them directly by name.
+- Runner Preview is generated from surfaced Smart Cells.
+- Local named configurations are browser-local for now.
+- Excel import is now an early local prototype path: import an `.xlsx` calculator, preserve workbook sheets, preserve values/formulas, create a new local configuration, and then structure it with Quoin Smart Cells.
+- The user-facing feature name for workbook tabs is "Sheet." Use "Workbook Structure" for the underlying model, not the primary UI label.
+- Sheet tabs live immediately below the formula bar and above the grid to match Excel muscle memory.
+- Lookup table direction: keep the current embedded Smart Cell lookup tables as a prototype shortcut, but the intended product model is first-class reference tables / CSV-ingested datasets that lookup Smart Cells can query. This should feel closer to Excel tabs or named table ranges than hidden per-cell data.
+- Dropdown direction: short embedded option lists are acceptable for simple inputs; longer lists should eventually bind to visible/imported reference data. Current Excel import snapshots supported same-workbook dropdown sources into embedded options rather than live-binding them.
+- User-facing UI copy should prefer brand-neutral words like spreadsheet, workbook, Sheet, formula, lookup formula, and imported workbook. Avoid unnecessary visible "Excel" wording in the app; keep explicit Excel references mainly in internal docs where needed for implementation clarity.
+- AI ingestion, database persistence, auth, departments, publishing, and audit reports are later phases.
+
+Reference docs are stored in `docs/reference/`.
+
+## Source Control
+
+This project is now tracked in Git from this folder:
+
+```text
+C:\Quoin - Codex
+```
+
+Remote:
+
+```text
+https://github.com/ReadyBoxSystems/Quoin.git
+```
+
+Use `main` as the primary branch.
+
+The baseline commit is:
+
+```text
+5259f17 Initial Quoin prototype baseline
+```
+
+Do not commit generated folders such as `.next`, `node_modules`, `out`, or `dist`.
+
+## How To Run
+
+The preferred user entry point is:
+
+```bat
+Quoin.bat
+```
+
+Double-clicking `Quoin.bat` starts the Next.js dev server and opens:
+
+```text
+http://localhost:3000
+```
+
+Developer commands:
+
+```bash
+npm run typecheck
+npm run test:engine
+npm run test:import
+npm run test:import-reader
+```
+
+Avoid running `npm run build` while the user is actively testing the dev server. Next.js production builds can disturb the running `.next` dev output. If a production build is needed, stop the dev server first.
+
+## Current Architecture
+
+This is currently a local prototype with:
+
+- Next.js App Router
+- TypeScript
+- React client-side Variable Sheet
+- `mathjs`-based deterministic engine
+- Excel-style formula support for coordinate references, ranges, common function aliases, and `IF`
+- exact-match `VLOOKUP`, exact/default `XLOOKUP`, helper-key lookup formulas, and `ROUNDUP`
+- browser local storage persistence
+- browser-local named configurations
+- ExcelJS-based `.xlsx` workbook reader isolated behind `lib/import/read.ts`
+- neutral import model and Quoin sheet converter in `lib/import/`
+- local configurations can now hold multiple Sheets, with one active Sheet shown in the grid
+- Sheet rename support updates direct cross-Sheet references that use the old Sheet name
+- imported Excel data-validation list dropdowns are read in `lib/import/read.ts` and promoted/applied in `lib/import/convert.ts`
+- no database yet
+- no auth yet
+
+Important files:
+
+- `app/page.tsx` - renders the prototype shell
+- `components/variable-sheet.tsx` - main sheet, inspector, runner preview
+- `lib/sheet/types.ts` - local sheet/workbook configuration types
+- `lib/engine/index.ts` - calculation engine
+- `lib/engine/types.ts` - engine types
+- `lib/engine/engine.test.ts` - engine tests
+- `lib/import/types.ts` - neutral Excel import model
+- `lib/import/read.ts` - `.xlsx` workbook reader
+- `lib/import/convert.ts` - imported sheet to Quoin grid converter
+- `docs/archive/import-testing/` - historical import plan, manual test notes, and generated fixture workbooks from the completed importer pass
+- `Quoin.bat` - double-click launcher
+
+## Product Rules
+
+- Do not turn Quoin into a card/dashboard app. The authoring surface should remain spreadsheet-first.
+- Do not force users to design an app before doing spreadsheet work.
+- A normal cell should feel like a normal spreadsheet cell.
+- Excel import should bring in the calculator grid first; Smart Cell roles, labels, surfacing, and runner behavior remain Quoin-native follow-up work.
+- Exception: supported Excel dropdown inputs are promoted to surfaced input Smart Cells because dropdown behavior must remain visible where the cell is used.
+- Excel import should detect merged/spanning cells and report them as review items; do not silently duplicate merged-cell values into covered cells.
+- Excel import should snapshot simple typed dropdown lists and supported same-workbook range/named-range dropdown sources into embedded dropdown options. Unsupported dropdown sources should produce review items.
+- Preserve Excel-like muscle memory unless it conflicts with the Smart Cell model.
+- A Smart Cell is created by naming a cell.
+- Smart Cell metadata belongs in the side inspector, not crammed into the grid.
+- Smart Cell names are formula/backend-safe. Use Display Label for human-facing runner text.
+- Smart Cell names are workbook-scoped, so a unique name defined on one Sheet can be used directly by formulas on another Sheet.
+- Dropdown option configuration should be visible where the cell is used: the grid and Runner Preview should both show dropdown controls.
+- Cells with imported or configured dropdown options should render as dropdowns in the grid even before additional metadata polish.
+- Surfaced Smart Cells feed Runner Preview.
+- Normal coordinate cells do not appear in Runner Preview.
+- Action Smart Cells are for runner-facing shop actions/notes.
+- Validation is PASS/FAIL, not "block execution." Math should still run where possible.
+- Compliance is OK/WARN. Warnings do not invalidate the calculation.
+- Incomplete formulas should not crash the app while the user is typing.
+- Imported formulas should remain visible even if Quoin cannot calculate them yet. Unsupported or risky Excel features should produce review items, not silent data loss.
+- Exact-match `VLOOKUP` and exact/default `XLOOKUP` are supported as calculation primitives in normal formulas. Approximate lookup behavior remains review-first.
+- Long-term lookup behavior should center on visible/imported reference data: pasted grids, named ranges/tables, and CSV imports that can be versioned and audited later. Do not over-invest in the current inspector-embedded lookup table UI as the final model.
+
+## Development Rules
+
+- Keep the engine independent from React, Next.js, and persistence.
+- Add engine tests for calculation behavior changes.
+- Add import tests for workbook parsing, conversion, and formula review changes.
+- During active UI iteration, run `npm run typecheck` and `npm run test:engine`.
+- During Excel import work, also run `npm run test:import` and `npm run test:import-reader`. The old generated fixture workbooks are archived under `docs/archive/import-testing/`; regenerate or design new fixtures only when import behavior changes.
+- Formula calculation changes need focused engine tests.
+- Prefer small UX iterations that preserve the spreadsheet mental model.
+- Do not modify or rely on the old `C:\Quoin` project unless the user explicitly asks.
+
+## Next Likely Work
+
+See `ROADMAP.md`.
