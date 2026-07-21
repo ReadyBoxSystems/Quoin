@@ -6,12 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
-    "test:engine": "tsx lib/engine/engine.test.ts",
-    "test:import": "tsx lib/import/convert.test.ts",
-    "test:import-reader": "tsx lib/import/read.test.ts",
-    "fixtures:generate": "node scripts/generate-import-fixtures.mjs",
-    "fixtures:smoke": "tsx scripts/smoke-import-fixtures.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
@@ -24,7 +19,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "tsx": "^4.20.0",
     "typescript": "^5"
   }
 }

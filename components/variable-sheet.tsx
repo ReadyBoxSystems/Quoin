@@ -233,7 +233,33 @@ export function VariableSheet() {
   const selectedCell = getCell(cells, selectedAddress);
   const selectedDropdownOptionsText = selectedCell.inputOptions.join("\n");
   const engineCells = useMemo(() => toEngineCells(cells), [cells]);
-  const result = useMemo(() => executeEngine({ cells: engineCells }), [engineCells]);
+  const visibleSheets = useMemo(
+    () => sheets.length > 0
+      ? sheets.map((sheet) => (
+        sheet.id === activeSheetId
+          ? { ...sheet, cells, columnCount, rowCount }
+          : sheet
+      ))
+      : [],
+    [activeSheetId, cells, columnCount, rowCount, sheets],
+  );
+  const workbookEngineSheets = useMemo(
+    () => visibleSheets.map((sheet) => ({
+      id: sheet.id,
+      name: sheet.name,
+      cells: toEngineCells(sheet.cells),
+    })),
+    [visibleSheets],
+  );
+  const workbookResult = useMemo(() => executeWorkbookEngine({ sheets: workbookEngineSheets }), [workbookEngineSheets]);
+  const result = useMemo(
+    () => workbookResult.sheetResults.find((item) => item.sheetId === activeSheet?.id)?.result ?? executeEngine({ cells: engineCells }),
+    [activeSheet?.id, engineCells, workbookResult],
+  );
+  const runnerSheets = useMemo(
+    () => buildRunnerSheetContexts(visibleSheets, workbookResult),
+    [visibleSheets, workbookResult],
+  );
   const ruleStateMap = useMemo(() => new Map(result.ruleStates.map((rule) => [rule.address, rule.state])), [result.ruleStates]);
   const displayValues = useMemo(
     () => buildDisplayValues(cells, result.values, result.errors, ruleStateMap, columns, rowCount),
@@ -993,26 +1019,6 @@ export function VariableSheet() {
     setImportError("");
   }
 
-  const visibleSheets = sheets.length > 0
-    ? sheets.map((sheet) => (
-      sheet.id === activeSheetId
-        ? { ...sheet, cells, columnCount, rowCount }
-        : sheet
-    ))
-    : [];
-  const workbookEngineSheets = useMemo(
-    () => visibleSheets.map((sheet) => ({
-      id: sheet.id,
-      name: sheet.name,
-      cells: toEngineCells(sheet.cells),
-    })),
-    [visibleSheets],
-  );
-  const workbookResult = useMemo(() => executeWorkbookEngine({ sheets: workbookEngineSheets }), [workbookEngineSheets]);
-  const runnerSheets = useMemo(
-    () => buildRunnerSheetContexts(visibleSheets, workbookResult),
-    [visibleSheets, workbookResult],
-  );
   const selectedIssues = issueMap.get(selectedAddress) ?? [];
   const selectedImportSheet = pendingImport?.sheets.find((sheet) => sheet.id === selectedImportSheetId) ?? pendingImport?.sheets[0] ?? null;
   const importReviewItems = pendingImport && selectedImportSheet
@@ -2353,7 +2359,7 @@ function referencesForAddress(cell: GridCell): string[] {
 
 function referencesForFormula(entry: string): string[] {
   const rawExpression = entry.trim().startsWith("=") ? entry.trim().slice(1) : entry;
-  const expression = rawExpression.replace(/"[^"]*"|'[^']*'/g, " ");
+  const expression = stripCrossSheetReferences(rawExpression).replace(/"[^"]*"/g, " ");
   const refs = new Set<string>();
 
   for (const range of expression.matchAll(/\b([A-Z]+[1-9]\d*)\s*:\s*([A-Z]+[1-9]\d*)\b/g)) {
@@ -2368,6 +2374,12 @@ function referencesForFormula(entry: string): string[] {
   }
 
   return [...refs];
+}
+
+function stripCrossSheetReferences(expression: string): string {
+  return expression
+    .replace(/'((?:[^']|'')+)'\!\$?[A-Z]+\$?[1-9]\d*(?:\s*:\s*\$?[A-Z]+\$?[1-9]\d*)?/gi, " ")
+    .replace(/\b[A-Za-z_][A-Za-z0-9_]*\!\$?[A-Z]+\$?[1-9]\d*(?:\s*:\s*\$?[A-Z]+\$?[1-9]\d*)?/g, " ");
 }
 
 function expandAddressRange(start: string, end: string): string[] {

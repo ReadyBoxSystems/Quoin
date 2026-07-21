@@ -39,5 +39,8 @@ IMPORT_PLAN.md
 IMPORT_TEST_FILES.md
 KNOWN_ISSUES.md
 Quoin test notes.md
-docs/ref/
-docs/reference/
+docs/
+
+# Local test and fixture utilities
+*.test.ts
+scripts/

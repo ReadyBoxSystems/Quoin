@@ -520,9 +520,25 @@ function evaluateExpression(
     const result = node.evaluate(expressionScope);
     return normalizeValue(result);
   } catch (error) {
-    errors.push(issue(cell, `Formula error: ${(error as Error).message}`));
+    errors.push(issue(cell, `Formula error: ${friendlyFormulaError((error as Error).message)}`));
     return null;
   }
+}
+
+function friendlyFormulaError(message: string): string {
+  if (/unexpected type of argument in function (multiplyScalar|divideScalar|addScalar|subtractScalar)/i.test(message)) {
+    return "This formula tried to do math with a value that is blank, text, or did not calculate.";
+  }
+
+  if (/cannot convert .+ to a number/i.test(message)) {
+    return "This formula tried to do math with a value that is blank, text, or did not calculate.";
+  }
+
+  if (/unexpected type of argument/i.test(message)) {
+    return "This formula used a value with the wrong type for that calculation.";
+  }
+
+  return message;
 }
 
 function replaceLookupCallsWithValues(
