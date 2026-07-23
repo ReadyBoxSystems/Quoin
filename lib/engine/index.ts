@@ -17,6 +17,8 @@ const math = create(all, {}) as MathJsInstance;
 math.import(
   {
     SUM: (...values: unknown[]) => sumValues(values),
+    COUNT: (...values: unknown[]) => countNumericValues(values),
+    count: (...values: unknown[]) => countNumericValues(values),
     average: (...values: unknown[]) => averageValues(values),
     AVERAGE: (...values: unknown[]) => averageValues(values),
     MAX: (...values: unknown[]) => Math.max(...numericValues(values)),
@@ -53,6 +55,8 @@ math.import(
 const ALLOWED_FUNCTIONS = new Set([
   "sum",
   "SUM",
+  "count",
+  "COUNT",
   "mean",
   "average",
   "AVERAGE",
@@ -768,6 +772,10 @@ function parseExpression(expression: string): MathNode {
 
 function sumValues(values: unknown[]): number {
   return numericValues(values).reduce((total, value) => total + value, 0);
+}
+
+function countNumericValues(values: unknown[]): number {
+  return numericValues(values).length;
 }
 
 function averageValues(values: unknown[]): number {

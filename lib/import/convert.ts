@@ -8,6 +8,7 @@ const cellAddressPattern = /^([A-Z]+)([1-9]\d*)$/;
 const safeSmartCellNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const supportedFormulaFunctions = new Set([
   "SUM",
+  "COUNT",
   "AVERAGE",
   "MAX",
   "MIN",

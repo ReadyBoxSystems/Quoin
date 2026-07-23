@@ -1847,6 +1847,7 @@ function HelpPanel() {
           <p>A range is a group of cells between two addresses. Quoin supports single-column, single-row, and rectangular ranges for common aggregate formulas.</p>
           <ul>
             <li><code>=SUM(A1:A5)</code> and <code>=SUM(A1:B3)</code> use ranges.</li>
+            <li><code>=COUNT(A1:A5)</code> counts numeric values in a range.</li>
             <li><code>=AVERAGE(B2:B10)</code> averages a vertical range.</li>
             <li><code>=MAX(A1:D1)</code> finds the largest value across a row.</li>
             <li><code>=SUM(Loads!B3:B5)</code> can aggregate a supported range from another Sheet.</li>
@@ -1855,6 +1856,7 @@ function HelpPanel() {
           <p>Functions perform named operations. Quoin accepts familiar uppercase spreadsheet function names and maps them to deterministic engine behavior.</p>
           <ul>
             <li><code>=SUM(A1:A5)</code> adds values.</li>
+            <li><code>=COUNT(A1:A5)</code> counts cells with numeric values and ignores blanks or text.</li>
             <li><code>=AVERAGE(A1:A5)</code> calculates the mean.</li>
             <li><code>=MIN(A1:A5)</code> and <code>=MAX(A1:A5)</code> find bounds.</li>
             <li><code>=ROUND(B6, 2)</code> rounds to two decimal places.</li>
