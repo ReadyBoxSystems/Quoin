@@ -1,33 +1,61 @@
 # Quoin
 
-Most shops run on a combination of PDF references, Excel calculators, and knowledge that lives in people's heads. That works until it doesn't — when the calculator is wrong, when the expert is out, when the new hire guesses. Quoin is a tool for capturing that logic in a structured, auditable form and surfacing it as a controlled workflow for whoever needs it.
+Quoin is a spreadsheet-first tool for turning shop knowledge into structured, repeatable workflows.
 
-## How It Works
+Many teams run on a mix of spreadsheet calculators, reference PDFs, tribal knowledge, and handwritten judgment calls. That works until a calculator is hard to audit, the expert is unavailable, or a new hire has to guess which assumptions matter.
 
-Quoin starts with an Excel-familiar spreadsheet surface, then lets an admin turn the important parts of a calculator into a controlled workflow:
+Quoin starts where those teams already work: a familiar grid. Admins can build or import calculator logic, prove the math, then promote the important cells into Smart Cells that power a controlled Runner Preview.
 
-1. Build a spreadsheet calculator in Quoin or import an existing `.xlsx` workbook.
-2. Verify the math in the grid before adding workflow behavior.
-3. Name the cells that matter, promoting them into Smart Cells.
-4. Configure each Smart Cell's role, type, labels, rules, lookup behavior, and runner-facing behavior.
-5. Use Runner Preview to generate the controlled form from the surfaced Smart Cells.
+## What Quoin Does
 
-Existing `.xlsx` calculators import directly, so admins can start from working shop calculators instead of rebuilding them from scratch.
+- Provides an Excel-familiar authoring grid for normal values and formulas.
+- Supports common spreadsheet behavior such as coordinate references, ranges, `IF`, `COUNT`, `ROUNDUP`, exact-match `VLOOKUP`, and exact/default `XLOOKUP`.
+- Preserves multi-Sheet workbook structure during local `.xlsx` import.
+- Lets admins name important cells, turning them into Smart Cells with roles, labels, annotations, dropdowns, lookup behavior, actions, validation, and compliance warnings.
+- Generates Runner Preview from surfaced Smart Cells so the runner sees the controlled workflow instead of the calculator guts.
+- Stores configurations locally in the browser while the product model is still being proven.
 
-## Current State
+## Workflow
 
-Quoin is currently an internal prototype under active development. It is browser-local, with no backend and no user accounts. The beam selection demo shows the intended shape of the workflow: spreadsheet authoring first, then structured Smart Cells, then a runner-facing controlled form.
+1. Build a calculator directly in Quoin, or import an existing workbook.
+2. Verify the math in the spreadsheet grid.
+3. Name the important cells to promote them into Smart Cells.
+4. Add display labels, roles, dropdown options, rules, lookup behavior, and runner surfacing.
+5. Use Runner Preview to see the controlled workflow generated from the Smart Cells.
+6. Save the configuration locally in the browser.
 
-## Stack
+The goal is not to force teams to design an app before doing spreadsheet work. The grid comes first. The structure is added where it helps.
 
-Next.js · TypeScript · React · browser local storage
+## Current Prototype Scope
 
-## Running It
+Quoin is an internal prototype under active development.
+
+Current scope:
+
+- Next.js App Router
+- React and TypeScript
+- deterministic formula engine powered by `mathjs`
+- local browser storage
+- local named configurations
+- local `.xlsx` workbook import
+- no backend database
+- no authentication
+- no published execution records yet
+
+The included demo uses fake, non-proprietary data and is meant to show the workflow direction, not provide engineering guidance.
+
+## Running Locally
 
 On Windows, double-click:
 
 ```bat
 Quoin.bat
+```
+
+The launcher starts the development server and opens:
+
+```text
+http://localhost:3000
 ```
 
 Or run it from a terminal:
@@ -43,14 +71,6 @@ Then open:
 http://localhost:3000
 ```
 
-## Testing
+## Status
 
-Available test commands:
-
-```bash
-npm run typecheck
-npm run test:engine
-npm run test:import
-npm run test:import-reader
-npm run fixtures:smoke
-```
+This repository contains the runnable prototype app. Internal planning notes, local test files, generated fixtures, logs, and reference documents are intentionally kept out of the GitHub-tracked app surface.
