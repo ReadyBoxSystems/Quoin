@@ -421,6 +421,7 @@ function makeImportedGridCell(address: string, importedCell: ImportedCell): Grid
     inputControl: "freeText",
     inputOptions: [],
     surfaced: false,
+    runnerSection: "",
     annotation: "",
     ruleMessage: "",
   };
@@ -525,6 +526,7 @@ function makeEmptyGridCell(address: string): GridCell {
     inputControl: "freeText",
     inputOptions: [],
     surfaced: false,
+    runnerSection: "",
     annotation: "",
     ruleMessage: "",
   };

@@ -8,7 +8,13 @@ export interface LookupConfig {
   rows: Array<Record<string, CellValue>>;
 }
 
-export type InputControl = "freeText" | "dropdown";
+export type InputControl = "freeText" | "dropdown" | "checkbox";
+
+export interface SmartCellVisibilityCondition {
+  source: string;
+  operator: "equals";
+  value: string | number | boolean;
+}
 
 export interface GridCell {
   address: string;
@@ -20,6 +26,8 @@ export interface GridCell {
   inputControl: InputControl;
   inputOptions: string[];
   surfaced: boolean;
+  visibilityCondition?: SmartCellVisibilityCondition;
+  runnerSection: string;
   annotation: string;
   ruleMessage: string;
   lookup?: LookupConfig;

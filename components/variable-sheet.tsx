@@ -12,7 +12,7 @@ import {
 } from "@/lib/engine";
 import { convertImportedSheetToQuoin } from "@/lib/import/convert";
 import type { ImportedName, ImportedWorkbook, ImportReviewItem } from "@/lib/import/types";
-import type { GridCell, InputControl, LocalConfiguration, LookupConfig, SheetSnapshot, WorkbookSheet } from "@/lib/sheet/types";
+import type { GridCell, InputControl, LocalConfiguration, LookupConfig, SheetSnapshot, SmartCellVisibilityCondition, WorkbookSheet } from "@/lib/sheet/types";
 
 const STORAGE_KEY = "quoin.gridSheet.v2";
 const CONFIG_STORAGE_KEY = "quoin.configurations.v1";
@@ -22,7 +22,9 @@ const defaultRowCount = 30;
 const historyLimit = 50;
 const roleOptions: SmartCellRole[] = ["input", "formula", "output", "action", "lookup", "validation", "compliance"];
 const typeOptions: SmartCellType[] = ["number", "text", "boolean"];
-const inputControlOptions: InputControl[] = ["freeText", "dropdown"];
+const inputControlOptions: InputControl[] = ["freeText", "dropdown", "checkbox"];
+
+type RunnerOverrides = Record<string, string>;
 
 interface DependencyItem {
   address: string;
@@ -43,6 +45,12 @@ interface RunnerSheetContext {
   surfacedCells: GridCell[];
   result: ReturnType<typeof executeEngine>;
   validationStates: Array<{ address: string; state: string; name?: string | null }>;
+}
+
+interface VisibilityControlOption {
+  name: string;
+  label: string;
+  sheetName: string;
 }
 
 const beamLookup: LookupConfig = {
@@ -224,6 +232,7 @@ export function VariableSheet() {
   const [importMessage, setImportMessage] = useState("");
   const [importError, setImportError] = useState("");
   const [dropdownOptionsDraft, setDropdownOptionsDraft] = useState("");
+  const [runnerOverrides, setRunnerOverrides] = useState<RunnerOverrides>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const cellRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -252,13 +261,34 @@ export function VariableSheet() {
     [visibleSheets],
   );
   const workbookResult = useMemo(() => executeWorkbookEngine({ sheets: workbookEngineSheets }), [workbookEngineSheets]);
+  const runnerVisibleSheets = useMemo(
+    () => applyRunnerOverridesToSheets(visibleSheets, runnerOverrides),
+    [runnerOverrides, visibleSheets],
+  );
+  const runnerWorkbookEngineSheets = useMemo(
+    () => runnerVisibleSheets.map((sheet) => ({
+      id: sheet.id,
+      name: sheet.name,
+      cells: toEngineCells(sheet.cells),
+    })),
+    [runnerVisibleSheets],
+  );
+  const runnerWorkbookResult = useMemo(() => executeWorkbookEngine({ sheets: runnerWorkbookEngineSheets }), [runnerWorkbookEngineSheets]);
   const result = useMemo(
     () => workbookResult.sheetResults.find((item) => item.sheetId === activeSheet?.id)?.result ?? executeEngine({ cells: engineCells }),
     [activeSheet?.id, engineCells, workbookResult],
   );
   const runnerSheets = useMemo(
-    () => buildRunnerSheetContexts(visibleSheets, workbookResult),
-    [visibleSheets, workbookResult],
+    () => buildRunnerSheetContexts(runnerVisibleSheets, runnerWorkbookResult),
+    [runnerVisibleSheets, runnerWorkbookResult],
+  );
+  const visibleRunnerKeys = useMemo(
+    () => new Set(runnerSheets.flatMap((sheet) => sheet.surfacedCells.filter((cell) => cell.role === "input").map((cell) => runnerOverrideKey(sheet.sheetId, cell.address)))),
+    [runnerSheets],
+  );
+  const visibilityControls = useMemo(
+    () => buildVisibilityControlOptions(visibleSheets),
+    [visibleSheets],
   );
   const ruleStateMap = useMemo(() => new Map(result.ruleStates.map((rule) => [rule.address, rule.state])), [result.ruleStates]);
   const displayValues = useMemo(
@@ -341,6 +371,13 @@ export function VariableSheet() {
   }, [editingAddress]);
 
   useEffect(() => {
+    setRunnerOverrides((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([key]) => visibleRunnerKeys.has(key)));
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }, [visibleRunnerKeys]);
+
+  useEffect(() => {
     if (editingAddress || activeView !== "sheet") return;
     cellRefs.current[selectedAddress]?.focus();
   }, [activeView, editingAddress, selectedAddress]);
@@ -397,30 +434,30 @@ export function VariableSheet() {
   }
 
   function updateCell(address: string, patch: Partial<GridCell>) {
+    const existing = getCell(cells, address);
+    const oldName = existing.name;
+    const nextName = patch.name;
     applyCellsChange((current) => {
       const existing = getCell(current, address);
       return { ...current, [address]: applyCellPatch(existing, patch) };
     });
+
+    if (nextName !== undefined && oldName && nextName && oldName !== nextName) {
+      renameVisibilityConditionSource(oldName, nextName);
+    }
   }
 
-  function updateWorkbookCell(sheetId: string, address: string, patch: Partial<GridCell>) {
-    if (sheetId === activeSheetId) {
-      updateCell(address, patch);
-      return;
-    }
-
-    setSheets((current) => current.map((sheet) => {
-      if (sheet.id !== sheetId) return sheet;
-      const existing = getCell(sheet.cells, address);
-      return {
-        ...sheet,
-        cells: {
-          ...sheet.cells,
-          [address]: applyCellPatch(existing, patch),
-        },
-      };
+  function updateRunnerCell(sheetId: string, address: string, entry: string) {
+    setRunnerOverrides((current) => ({
+      ...current,
+      [runnerOverrideKey(sheetId, address)]: entry,
     }));
-    setIsDirty(true);
+  }
+
+  function renameVisibilityConditionSource(oldName: string, newName: string) {
+    const renameCells = (source: Record<string, GridCell>) => renameVisibilityConditionReferences(source, oldName, newName);
+    setCells((current) => renameCells(current));
+    setSheets((current) => current.map((sheet) => ({ ...sheet, cells: renameCells(sheet.cells) })));
   }
 
   function commitDropdownOptions(address = selectedAddress) {
@@ -706,6 +743,7 @@ export function VariableSheet() {
     setRowCount(defaultRowCount);
     setSelectedAddress("B2");
     setEditingAddress(null);
+    setRunnerOverrides({});
   }
 
   function clearSheet() {
@@ -713,6 +751,7 @@ export function VariableSheet() {
     setSelectedAddress("A1");
     setEditingAddress(null);
     setDraftEntry("");
+    setRunnerOverrides({});
   }
 
   function currentWorkbookSheets(): WorkbookSheet[] {
@@ -859,6 +898,7 @@ export function VariableSheet() {
     setSelectedAddress("A1");
     setEditingAddress(null);
     setDraftEntry("");
+    setRunnerOverrides({});
     setIsDirty(false);
   }
 
@@ -1247,14 +1287,14 @@ export function VariableSheet() {
               selectedIssues={selectedIssues}
               updateCell={updateCell}
               updateLookup={updateLookup}
+              visibilityControls={visibilityControls}
             />
           </div>
         </>
       ) : activeView === "runner" ? (
         <RunnerPreview
-          result={workbookResult}
           runnerSheets={runnerSheets}
-          updateCell={updateWorkbookCell}
+          updateRunnerCell={updateRunnerCell}
         />
       ) : (
         <HelpPanel />
@@ -1342,6 +1382,7 @@ function Inspector({
   setDropdownOptionsDraft,
   updateCell,
   updateLookup,
+  visibilityControls,
 }: {
   clearCell: (address: string) => void;
   commitDropdownOptions: (address?: string) => void;
@@ -1354,7 +1395,13 @@ function Inspector({
   setDropdownOptionsDraft: (value: string) => void;
   updateCell: (address: string, patch: Partial<GridCell>) => void;
   updateLookup: (patch: Partial<LookupConfig>) => void;
+  visibilityControls: VisibilityControlOption[];
 }) {
+  const selectedVisibilityControl = selectedCell.visibilityCondition?.source
+    ? visibilityControls.find((control) => control.name === selectedCell.visibilityCondition?.source)
+    : null;
+  const hasMissingVisibilitySource = Boolean(selectedCell.visibilityCondition?.source && !selectedVisibilityControl);
+
   return (
     <aside className="inspector" aria-label="Selected cell inspector">
       <div className="inspectorHeader">
@@ -1460,11 +1507,15 @@ function Inspector({
                       ? [selectedCell.entry.trim()]
                       : selectedCell.inputOptions;
                     setDropdownOptionsDraft(options.join("\n"));
-                    updateCell(selectedAddress, { inputControl, inputOptions: inputControl === "dropdown" ? options : [] });
+                    updateCell(selectedAddress, {
+                      inputControl,
+                      inputOptions: inputControl === "dropdown" ? options : [],
+                      type: inputControl === "checkbox" ? "boolean" : selectedCell.type,
+                    });
                   }}
                 >
                   {inputControlOptions.map((inputControl) => (
-                    <option key={inputControl} value={inputControl}>{inputControl === "freeText" ? "Free text" : "Dropdown"}</option>
+                    <option key={inputControl} value={inputControl}>{labelForInputControl(inputControl)}</option>
                   ))}
                 </select>
               </label>
@@ -1482,6 +1533,58 @@ function Inspector({
             </label>
             <span>{selectedCell.surfaced ? "Visible in Runner Preview" : "Authoring only"}</span>
           </div>
+
+          {selectedCell.surfaced && (
+            <div className="runnerVisibilityBox">
+              <div className="sectionTitle">
+                <strong>Runner Visibility</strong>
+                <span>Optional grouping and conditional display</span>
+              </div>
+              <label>
+                Runner Section
+                <input
+                  value={selectedCell.runnerSection}
+                  onChange={(event) => updateCell(selectedAddress, { runnerSection: event.target.value })}
+                  placeholder="Example: Dormers"
+                />
+              </label>
+              <label>
+                Conditional
+                <select
+                  value={selectedCell.visibilityCondition?.source ?? ""}
+                  onChange={(event) => {
+                    const source = event.target.value;
+                    updateCell(selectedAddress, {
+                      visibilityCondition: source
+                        ? { source, operator: "equals", value: true }
+                        : undefined,
+                    });
+                  }}
+                >
+                  <option value="">Always show</option>
+                  {visibilityControls
+                    .filter((control) => control.name !== selectedCell.name)
+                    .map((control) => (
+                      <option key={control.name} value={control.name}>
+                        Show when {control.label} is checked
+                      </option>
+                    ))}
+                </select>
+                <span>
+                  {selectedCell.visibilityCondition?.source
+                    ? selectedVisibilityControl
+                      ? `Controlled by ${selectedVisibilityControl.sheetName} / ${selectedVisibilityControl.label}.`
+                      : "The selected control no longer exists or is not a boolean input."
+                    : "Use a surfaced checkbox input to show optional runner fields only when needed."}
+                </span>
+              </label>
+              {hasMissingVisibilitySource && (
+                <div className="issueBox">
+                  <p>This Smart Cell is hidden in Runner Preview until its missing condition source is repaired.</p>
+                </div>
+              )}
+            </div>
+          )}
 
           <label>
             Internal Annotation
@@ -1585,13 +1688,11 @@ function Inspector({
 }
 
 function RunnerPreview({
-  result,
-  updateCell,
+  updateRunnerCell,
   runnerSheets,
 }: {
-  result: WorkbookEngineResult;
   runnerSheets: RunnerSheetContext[];
-  updateCell: (sheetId: string, address: string, patch: Partial<GridCell>) => void;
+  updateRunnerCell: (sheetId: string, address: string, entry: string) => void;
 }) {
   const showSheetGroups = runnerSheets.filter((sheet) => sheet.surfacedCells.length > 0).length > 1;
   const inputGroups = runnerSheets.map((sheet) => ({
@@ -1614,6 +1715,7 @@ function RunnerPreview({
     ...sheet,
     items: sheet.validationStates,
   })).filter((sheet) => sheet.items.length > 0);
+  const visibleRunnerValid = !validationGroups.some((group) => group.items.some((rule) => rule.state === "fail" || rule.state === "error"));
 
   return (
     <section className="runnerPreview">
@@ -1622,7 +1724,7 @@ function RunnerPreview({
           <p className="eyebrow">Runner Preview</p>
           <h2>Generated Form</h2>
         </div>
-        <span data-valid={result.valid}>{result.valid ? "Ready" : "Failed Validation"}</span>
+        <span data-valid={visibleRunnerValid}>{visibleRunnerValid ? "Ready" : "Failed Validation"}</span>
       </div>
 
       <div className={`runnerGrid ${outputGroups.length === 0 ? "runnerGridSingle" : ""}`}>
@@ -1633,21 +1735,34 @@ function RunnerPreview({
           ) : (
             inputGroups.map((group) => (
               <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
-                {group.items.map((cell) => (
-                  <label key={`${group.sheetId}-${cell.address}`}>
-                    {labelForCell(cell)}
-                    {isDropdownCell(cell) ? (
-                      <select value={cell.entry} onChange={(event) => updateCell(group.sheetId, cell.address, { entry: event.target.value })}>
-                        {!cell.entry && <option value="">Choose...</option>}
-                        {dropdownOptionsForCell(cell).map((option) => (
-                          <option key={option} value={option}>{prettifyName(option)}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input value={cell.entry} onChange={(event) => updateCell(group.sheetId, cell.address, { entry: event.target.value })} />
-                    )}
-                    {cell.annotation && <small>{cell.annotation}</small>}
-                  </label>
+                {groupItemsByRunnerSection(group.items, (cell) => cell).map((section) => (
+                  <RunnerSectionGroup key={section.label || "default"} label={section.label}>
+                    {section.items.map((cell) => (
+                      <label key={`${group.sheetId}-${cell.address}`}>
+                        {labelForCell(cell)}
+                        {isDropdownCell(cell) ? (
+                          <select value={cell.entry} onChange={(event) => updateRunnerCell(group.sheetId, cell.address, event.target.value)}>
+                            {!cell.entry && <option value="">Choose...</option>}
+                            {dropdownOptionsForCell(cell).map((option) => (
+                              <option key={option} value={option}>{prettifyName(option)}</option>
+                            ))}
+                          </select>
+                        ) : isCheckboxCell(cell) ? (
+                          <span className="runnerCheckbox">
+                            <input
+                              checked={parseCellValue(cell.entry, "boolean") === true}
+                              type="checkbox"
+                              onChange={(event) => updateRunnerCell(group.sheetId, cell.address, event.target.checked ? "true" : "false")}
+                            />
+                            {parseCellValue(cell.entry, "boolean") === true ? "Checked" : "Unchecked"}
+                          </span>
+                        ) : (
+                          <input value={cell.entry} onChange={(event) => updateRunnerCell(group.sheetId, cell.address, event.target.value)} />
+                        )}
+                        {cell.annotation && <small>{cell.annotation}</small>}
+                      </label>
+                    ))}
+                  </RunnerSectionGroup>
                 ))}
               </RunnerSheetGroup>
             ))
@@ -1659,12 +1774,16 @@ function RunnerPreview({
             <h3>Outputs</h3>
             {outputGroups.map((group) => (
               <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
-                {group.items.map((cell) => (
-                  <div className="runnerResult" key={`${group.sheetId}-${cell.address}`}>
-                    <span>{labelForCell(cell)}</span>
-                    <strong>{formatCellValue(group.displayValues[cell.address] ?? null)}</strong>
-                    {cell.annotation && <small>{cell.annotation}</small>}
-                  </div>
+                {groupItemsByRunnerSection(group.items, (cell) => cell).map((section) => (
+                  <RunnerSectionGroup key={section.label || "default"} label={section.label}>
+                    {section.items.map((cell) => (
+                      <div className="runnerResult" key={`${group.sheetId}-${cell.address}`}>
+                        <span>{labelForCell(cell)}</span>
+                        <strong>{formatCellValue(group.displayValues[cell.address] ?? null)}</strong>
+                        {cell.annotation && <small>{cell.annotation}</small>}
+                      </div>
+                    ))}
+                  </RunnerSectionGroup>
                 ))}
               </RunnerSheetGroup>
             ))}
@@ -1679,11 +1798,15 @@ function RunnerPreview({
               <h3>Shop Actions</h3>
               {actionGroups.map((group) => (
                 <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
-                  {group.items.map((cell) => (
-                    <p data-state="action" key={`${group.sheetId}-${cell.address}`}>
-                      <strong>ACTION</strong>
-                      {formatCellValue(group.displayValues[cell.address] ?? null) || labelForCell(cell)}
-                    </p>
+                  {groupItemsByRunnerSection(group.items, (cell) => cell).map((section) => (
+                    <RunnerSectionGroup key={section.label || "default"} label={section.label}>
+                      {section.items.map((cell) => (
+                        <p data-state="action" key={`${group.sheetId}-${cell.address}`}>
+                          <strong>ACTION</strong>
+                          {formatCellValue(group.displayValues[cell.address] ?? null) || labelForCell(cell)}
+                        </p>
+                      ))}
+                    </RunnerSectionGroup>
                   ))}
                 </RunnerSheetGroup>
               ))}
@@ -1694,11 +1817,15 @@ function RunnerPreview({
               <h3>Review Flags</h3>
               {warningGroups.map((group) => (
                 <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
-                  {group.items.map((warning) => (
-                    <p data-state="warn" key={warning.cellId}>
-                      <strong>WARN</strong>
-                      {warning.message}
-                    </p>
+                  {groupItemsByRunnerSection(group.items, (warning) => getCell(group.cells, warning.address)).map((section) => (
+                    <RunnerSectionGroup key={section.label || "default"} label={section.label}>
+                      {section.items.map((warning) => (
+                        <p data-state="warn" key={warning.cellId}>
+                          <strong>WARN</strong>
+                          {warning.message}
+                        </p>
+                      ))}
+                    </RunnerSectionGroup>
                   ))}
                 </RunnerSheetGroup>
               ))}
@@ -1713,15 +1840,19 @@ function RunnerPreview({
             <h3>Validation</h3>
             {validationGroups.map((group) => (
               <RunnerSheetGroup key={group.sheetId} showHeading={showSheetGroups} sheetName={group.sheetName}>
-                {group.items.map((rule) => {
-                  const cell = getCell(group.cells, rule.address);
-                  return (
-                    <p data-state={rule.state} key={`${group.sheetId}-${rule.address}`}>
-                      <strong>{formatCellValue(group.displayValues[rule.address] ?? null)}</strong>
-                      {cell.ruleMessage || cell.annotation || labelForCell(cell)}
-                    </p>
-                  );
-                })}
+                {groupItemsByRunnerSection(group.items, (rule) => getCell(group.cells, rule.address)).map((section) => (
+                  <RunnerSectionGroup key={section.label || "default"} label={section.label}>
+                    {section.items.map((rule) => {
+                      const cell = getCell(group.cells, rule.address);
+                      return (
+                        <p data-state={rule.state} key={`${group.sheetId}-${rule.address}`}>
+                          <strong>{formatCellValue(group.displayValues[rule.address] ?? null)}</strong>
+                          {cell.ruleMessage || cell.annotation || labelForCell(cell)}
+                        </p>
+                      );
+                    })}
+                  </RunnerSectionGroup>
+                ))}
               </RunnerSheetGroup>
             ))}
           </div>
@@ -1743,6 +1874,21 @@ function RunnerSheetGroup({
   return (
     <div className="runnerSheetGroup">
       {showHeading && <h4>{sheetName}</h4>}
+      {children}
+    </div>
+  );
+}
+
+function RunnerSectionGroup({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
+  return (
+    <div className="runnerSectionGroup">
+      {label && <h5>{label}</h5>}
       {children}
     </div>
   );
@@ -1919,6 +2065,19 @@ function HelpPanel() {
         </article>
 
         <article>
+          <h3>Conditional Runner Sections</h3>
+          <p>A surfaced checkbox input Smart Cell can control whether other surfaced Smart Cells appear in Runner Preview. This is runner visibility only; the Sheet and formulas still exist and calculate normally.</p>
+          <ul>
+            <li>Set the control Smart Cell to role input, value type boolean, input control checkbox, and Surface to runner.</li>
+            <li>On another surfaced Smart Cell, use Runner Visibility to choose Show when the checkbox is checked.</li>
+            <li>Use Runner Section for a short heading such as Dormers when several conditional fields belong together.</li>
+            <li>Hidden conditional validation and compliance messages do not appear in Runner Preview.</li>
+            <li>Runner-entered values are temporary. When a conditional input hides, its runner value returns to the Sheet default.</li>
+            <li>Hiding a Smart Cell does not remove its value from formulas. Use <code>IF</code> when optional values should change totals.</li>
+          </ul>
+        </article>
+
+        <article>
           <h3>Validation vs Compliance</h3>
           <p>Validation and compliance are intentionally different. Validation is for run failure; compliance is for warning the runner. Math should still run where possible.</p>
           <ul>
@@ -2065,11 +2224,13 @@ function Row({
         const editing = editingAddress === address;
         const issues = issueMap.get(address) ?? [];
         const hasDropdown = isDropdownCell(cell);
+        const hasCheckbox = isCheckboxCell(cell);
         const dropdownOptions = dropdownOptionsForCell(cell);
         return (
           <div
             className="gridCell"
             data-dropdown={hasDropdown}
+            data-checkbox={hasCheckbox}
             data-editing={editing}
             data-issue={issues.length > 0}
             data-role={cell.name ? cell.role : "normal"}
@@ -2109,6 +2270,17 @@ function Row({
                   <option key={option} value={option}>{prettifyName(option)}</option>
                 ))}
               </select>
+            ) : hasCheckbox ? (
+              <label className="gridCheckbox" onClick={(event) => event.stopPropagation()}>
+                <input
+                  aria-label={`${address} checkbox`}
+                  checked={parseCellValue(cell.entry, "boolean") === true}
+                  type="checkbox"
+                  onFocus={() => handleCellClick(address)}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  onChange={(event) => updateCell(address, { entry: event.target.checked ? "true" : "false" })}
+                />
+              </label>
             ) : (
               <span className="cellDisplay">{formatCellValue(displayValues[address] ?? null)}</span>
             )}
@@ -2264,6 +2436,7 @@ function makeCell(
     inputControl: "freeText",
     inputOptions: [],
     surfaced: false,
+    runnerSection: "",
     annotation: "",
     ruleMessage: "",
     ...options,
@@ -2285,6 +2458,7 @@ function hydrateCells(cells: Record<string, GridCell>): Record<string, GridCell>
         ...cell,
         inputControl: cell.inputControl ?? (inputOptions.length > 0 ? "dropdown" : "freeText"),
         inputOptions,
+        runnerSection: cell.runnerSection ?? "",
         lookup: cell.lookup ?? (cell.role === "lookup" || cell.role === "action" ? starterLookup : undefined),
       };
 
@@ -2295,6 +2469,28 @@ function hydrateCells(cells: Record<string, GridCell>): Record<string, GridCell>
 
 function cloneCells(cells: Record<string, GridCell>): Record<string, GridCell> {
   return JSON.parse(JSON.stringify(cells)) as Record<string, GridCell>;
+}
+
+function runnerOverrideKey(sheetId: string, address: string): string {
+  return `${sheetId}!${address}`;
+}
+
+function applyRunnerOverridesToSheets(sheets: WorkbookSheet[], overrides: RunnerOverrides): WorkbookSheet[] {
+  return sheets.map((sheet) => {
+    let cells = sheet.cells;
+
+    for (const [key, entry] of Object.entries(overrides)) {
+      if (!key.startsWith(`${sheet.id}!`)) continue;
+      const address = key.slice(sheet.id.length + 1);
+      const existing = getCell(cells, address);
+      cells = {
+        ...cells,
+        [address]: applyCellPatch(existing, { entry }),
+      };
+    }
+
+    return cells === sheet.cells ? sheet : { ...sheet, cells };
+  });
 }
 
 function cellsEqual(left: Record<string, GridCell>, right: Record<string, GridCell>): boolean {
@@ -2751,6 +2947,10 @@ function isDropdownCell(cell: GridCell): boolean {
   return cell.role === "input" && cell.inputControl === "dropdown";
 }
 
+function isCheckboxCell(cell: GridCell): boolean {
+  return cell.role === "input" && cell.inputControl === "checkbox";
+}
+
 function dropdownOptionsForCell(cell: GridCell): string[] {
   if (!isDropdownCell(cell)) return [];
   if (cell.entry && !cell.inputOptions.includes(cell.entry)) return [cell.entry, ...cell.inputOptions];
@@ -2803,16 +3003,19 @@ function toEngineCells(cells: Record<string, GridCell>): EngineCell[] {
 }
 
 function buildRunnerSheetContexts(sheets: WorkbookSheet[], workbookResult: WorkbookEngineResult): RunnerSheetContext[] {
+  const visibilityValues = buildWorkbookVisibilityValues(sheets, workbookResult);
   return sheets.map((sheet) => {
     const sheetResult = workbookResult.sheetResults.find((item) => item.sheetId === sheet.id);
     const resultForSheet = sheetResult?.result ?? executeEngine({ cells: toEngineCells(sheet.cells) });
     const ruleStateMap = new Map(resultForSheet.ruleStates.map((rule) => [rule.address, rule.state]));
     const columns = makeColumns(sheet.columnCount);
     const displayValues = buildDisplayValues(sheet.cells, resultForSheet.values, resultForSheet.errors, ruleStateMap, columns, sheet.rowCount);
-    const surfacedCells = Object.values(sheet.cells).filter((cell) => cell.name && cell.surfaced);
+    const surfacedCells = Object.values(sheet.cells)
+      .filter((cell) => cell.name && cell.surfaced)
+      .filter((cell) => isCellVisibleInRunner(cell, visibilityValues));
     const validationStates = resultForSheet.ruleStates.filter((rule) => {
       const cell = getCell(sheet.cells, rule.address);
-      return cell.role === "validation" && cell.surfaced;
+      return cell.role === "validation" && cell.surfaced && isCellVisibleInRunner(cell, visibilityValues);
     });
 
     return {
@@ -2825,6 +3028,91 @@ function buildRunnerSheetContexts(sheets: WorkbookSheet[], workbookResult: Workb
       validationStates,
     };
   });
+}
+
+function buildWorkbookVisibilityValues(sheets: WorkbookSheet[], workbookResult: WorkbookEngineResult): Map<string, CellValue> {
+  const values = new Map<string, CellValue>();
+
+  for (const sheet of sheets) {
+    const sheetResult = workbookResult.sheetResults.find((item) => item.sheetId === sheet.id);
+    const resultForSheet = sheetResult?.result ?? executeEngine({ cells: toEngineCells(sheet.cells) });
+
+    for (const cell of Object.values(sheet.cells)) {
+      if (!cell.name) continue;
+      const value = resultForSheet.values[cell.address] ?? parseCellValue(cell.entry, cell.type);
+      if (!values.has(cell.name)) values.set(cell.name, value);
+    }
+  }
+
+  return values;
+}
+
+function isCellVisibleInRunner(cell: GridCell, visibilityValues: Map<string, CellValue>): boolean {
+  if (!cell.visibilityCondition) return true;
+  return isVisibilityConditionMet(cell.visibilityCondition, visibilityValues);
+}
+
+function isVisibilityConditionMet(condition: SmartCellVisibilityCondition, visibilityValues: Map<string, CellValue>): boolean {
+  if (!condition.source || !visibilityValues.has(condition.source)) return false;
+  const sourceValue = visibilityValues.get(condition.source);
+  if (sourceValue === undefined) return false;
+  return normalizeConditionValue(sourceValue) === normalizeConditionValue(condition.value);
+}
+
+function normalizeConditionValue(value: CellValue): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function buildVisibilityControlOptions(sheets: WorkbookSheet[]): VisibilityControlOption[] {
+  const names = new Map<string, number>();
+  for (const sheet of sheets) {
+    for (const cell of Object.values(sheet.cells)) {
+      if (cell.name) names.set(cell.name, (names.get(cell.name) ?? 0) + 1);
+    }
+  }
+
+  return sheets.flatMap((sheet) => Object.values(sheet.cells)
+    .filter((cell) => cell.name && names.get(cell.name) === 1 && cell.role === "input" && cell.type === "boolean")
+    .map((cell) => ({
+      name: cell.name,
+      label: labelForCell(cell),
+      sheetName: sheet.name,
+    })));
+}
+
+function renameVisibilityConditionReferences(cells: Record<string, GridCell>, oldName: string, newName: string): Record<string, GridCell> {
+  let changed = false;
+  const next = Object.fromEntries(Object.entries(cells).map(([address, cell]) => {
+    if (cell.visibilityCondition?.source !== oldName) return [address, cell];
+    changed = true;
+    return [address, {
+      ...cell,
+      visibilityCondition: {
+        ...cell.visibilityCondition,
+        source: newName,
+      },
+    }];
+  })) as Record<string, GridCell>;
+
+  return changed ? next : cells;
+}
+
+function groupItemsByRunnerSection<T>(items: T[], cellForItem: (item: T) => GridCell): Array<{ label: string; items: T[] }> {
+  const groups: Array<{ label: string; items: T[] }> = [];
+
+  for (const item of items) {
+    const label = cellForItem(item).runnerSection.trim();
+    let group = groups.find((candidate) => candidate.label === label);
+    if (!group) {
+      group = { label, items: [] };
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+
+  return groups;
 }
 
 function formatWorkbookWarnings(warnings: Array<{ cellId: string; message: string }>, runnerSheets: RunnerSheetContext[]): string {
@@ -3025,6 +3313,12 @@ function sanitizeName(value: string): string {
 
 function labelForCell(cell: GridCell): string {
   return cell.label.trim() || (cell.name ? prettifyName(cell.name) : cell.address);
+}
+
+function labelForInputControl(inputControl: InputControl): string {
+  if (inputControl === "dropdown") return "Dropdown";
+  if (inputControl === "checkbox") return "Checkbox";
+  return "Free text";
 }
 
 function formatCellValue(value: CellValue): string {
