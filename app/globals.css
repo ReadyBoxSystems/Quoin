@@ -321,6 +321,10 @@ h1 {
   padding: 0 10px;
 }
 
+.formulaBar input:focus {
+  box-shadow: inset 0 0 0 2px rgba(31, 111, 235, 0.25);
+}
+
 .spreadsheetFrame {
   background: var(--sheet);
   border: 1px solid var(--line-strong);
@@ -879,6 +883,27 @@ h1 {
   text-align: right;
 }
 
+.detectedTypeRow {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 10px;
+}
+
+.detectedTypeRow span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detectedTypeRow strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .runnerVisibilityBox {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1150,7 +1175,19 @@ h1 {
   font-size: 22px;
 }
 
-.runnerHeader span {
+.runnerSessionNote {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.runnerHeaderActions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.runnerHeaderActions span {
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--warn-ink);
@@ -1159,7 +1196,7 @@ h1 {
   padding: 7px 10px;
 }
 
-.runnerHeader span[data-valid="true"] {
+.runnerHeaderActions span[data-valid="true"] {
   color: var(--ok);
 }
 

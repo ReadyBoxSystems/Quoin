@@ -20,7 +20,8 @@ const ACTIVE_CONFIG_KEY = "quoin.activeConfiguration.v1";
 const defaultColumnCount = 16;
 const defaultRowCount = 30;
 const historyLimit = 50;
-const roleOptions: SmartCellRole[] = ["input", "formula", "output", "action", "lookup", "validation", "compliance"];
+const coreRoleOptions: SmartCellRole[] = ["input", "formula", "output"];
+const advancedRoleOptions: SmartCellRole[] = ["lookup", "action", "validation", "compliance"];
 const typeOptions: SmartCellType[] = ["number", "text", "boolean"];
 const inputControlOptions: InputControl[] = ["freeText", "dropdown", "checkbox"];
 
@@ -235,6 +236,7 @@ export function VariableSheet() {
   const [runnerOverrides, setRunnerOverrides] = useState<RunnerOverrides>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const formulaInputRef = useRef<HTMLInputElement>(null);
   const cellRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const activeSheet = useMemo(() => sheets.find((sheet) => sheet.id === activeSheetId) ?? sheets[0] ?? null, [activeSheetId, sheets]);
@@ -277,6 +279,10 @@ export function VariableSheet() {
   const result = useMemo(
     () => workbookResult.sheetResults.find((item) => item.sheetId === activeSheet?.id)?.result ?? executeEngine({ cells: engineCells }),
     [activeSheet?.id, engineCells, workbookResult],
+  );
+  const sheetRunnerSheets = useMemo(
+    () => buildRunnerSheetContexts(visibleSheets, workbookResult),
+    [visibleSheets, workbookResult],
   );
   const runnerSheets = useMemo(
     () => buildRunnerSheetContexts(runnerVisibleSheets, runnerWorkbookResult),
@@ -322,6 +328,8 @@ export function VariableSheet() {
     () => buildDependencySummary(cells, selectedAddress),
     [cells, selectedAddress],
   );
+  const summaryResult = activeView === "runner" ? runnerWorkbookResult : workbookResult;
+  const summaryRunnerSheets = activeView === "runner" ? runnerSheets : sheetRunnerSheets;
 
   useEffect(() => {
     setDropdownOptionsDraft(selectedDropdownOptionsText);
@@ -577,6 +585,10 @@ export function VariableSheet() {
     setDraftEntry("");
   }
 
+  function resetRunnerPreview() {
+    setRunnerOverrides({});
+  }
+
   function moveSelection(address: string, direction: "up" | "down" | "left" | "right") {
     const position = parseAddress(address);
     if (!position) return address;
@@ -686,7 +698,7 @@ export function VariableSheet() {
       setActiveReferenceIndex((current) => Math.max(0, current - 1));
       return;
     }
-    if (canUseReferencePopup && (event.key === "Tab" || event.key === "Enter")) {
+    if (canUseReferencePopup && event.key === "Tab") {
       event.preventDefault();
       insertReference(visibleReferenceOptions[activeReferenceIndex]?.reference ?? visibleReferenceOptions[0].reference);
       return;
@@ -730,7 +742,7 @@ export function VariableSheet() {
 
           const targetAddress = `${targetColumn}${targetRow}`;
           const existing = getCell(next, targetAddress);
-          next[targetAddress] = { ...existing, entry };
+          next[targetAddress] = applyCellPatch(existing, { entry });
         });
       });
       return next;
@@ -1188,6 +1200,7 @@ export function VariableSheet() {
             <span>{activeSheet ? `${activeSheet.name}!${selectedAddress}` : selectedAddress}</span>
             <input
               aria-label="Formula bar"
+              ref={formulaInputRef}
               value={editingAddress === selectedAddress ? draftEntry : selectedCell.entry}
               onChange={(event) => {
                 if (editingAddress !== selectedAddress) setEditingAddress(selectedAddress);
@@ -1197,7 +1210,7 @@ export function VariableSheet() {
               onBlur={() => editingAddress === selectedAddress && commitEditing()}
               onFocus={() => {
                 setEditingAddress(selectedAddress);
-                setDraftEntry(selectedCell.entry);
+                setDraftEntry(editingAddress === selectedAddress ? draftEntry : selectedCell.entry);
               }}
               placeholder="Value or formula"
             />
@@ -1293,6 +1306,8 @@ export function VariableSheet() {
         </>
       ) : activeView === "runner" ? (
         <RunnerPreview
+          hasRunnerOverrides={Object.keys(runnerOverrides).length > 0}
+          resetRunnerPreview={resetRunnerPreview}
           runnerSheets={runnerSheets}
           updateRunnerCell={updateRunnerCell}
         />
@@ -1300,18 +1315,18 @@ export function VariableSheet() {
         <HelpPanel />
       )}
 
-      {(Object.keys(workbookResult.outputs).length > 0 || workbookResult.warnings.length > 0) && (
-        <section className={`runnerStrip ${workbookResult.warnings.length === 0 ? "runnerStripSingle" : ""}`}>
-          {Object.keys(workbookResult.outputs).length > 0 && (
+      {(Object.keys(summaryResult.outputs).length > 0 || summaryResult.warnings.length > 0) && (
+        <section className={`runnerStrip ${summaryResult.warnings.length === 0 ? "runnerStripSingle" : ""}`}>
+          {Object.keys(summaryResult.outputs).length > 0 && (
             <div>
               <span>Surfaced Results</span>
-              <strong>{formatOutputs(workbookResult.outputs)}</strong>
+              <strong>{formatOutputs(summaryResult.outputs)}</strong>
             </div>
           )}
-          {workbookResult.warnings.length > 0 && (
+          {summaryResult.warnings.length > 0 && (
             <div data-kind="warning">
               <span>Review Needed</span>
-              <strong>{formatWorkbookWarnings(workbookResult.warnings, runnerSheets)}</strong>
+              <strong>{formatWorkbookWarnings(summaryResult.warnings, summaryRunnerSheets)}</strong>
             </div>
           )}
         </section>
@@ -1422,7 +1437,7 @@ function Inspector({
       {!selectedCell.name && (
         <div className="activationBox">
           <strong>Normal spreadsheet cell</strong>
-          <p>Add a Smart Cell name below when this cell needs metadata, runner surfacing, or named formula references.</p>
+          <p>Start by typing values and formulas in the grid. Add a Smart Cell name only when this cell needs runner visibility, metadata, or named formula references.</p>
         </div>
       )}
 
@@ -1436,6 +1451,11 @@ function Inspector({
           Cell Entry
           <input value={selectedCell.entry} onChange={(event) => updateCell(selectedAddress, { entry: event.target.value })} />
         </label>
+
+        <div className="detectedTypeRow">
+          <span>{selectedCell.entry.trim().startsWith("=") ? "Formula" : "Detected type"}</span>
+          <strong>{selectedCell.entry.trim().startsWith("=") ? "formula" : selectedCell.type}</strong>
+        </div>
 
         <label>
           Smart Cell Name
@@ -1480,9 +1500,16 @@ function Inspector({
                   updateCell(selectedAddress, { role, lookup: role === "lookup" || role === "action" ? selectedCell.lookup ?? starterLookup : selectedCell.lookup });
                 }}
               >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>{role}</option>
-                ))}
+                <optgroup label="Core">
+                  {coreRoleOptions.map((role) => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Advanced prototype">
+                  {advancedRoleOptions.map((role) => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
+                </optgroup>
               </select>
             </label>
             <label>
@@ -1688,9 +1715,13 @@ function Inspector({
 }
 
 function RunnerPreview({
+  hasRunnerOverrides,
+  resetRunnerPreview,
   updateRunnerCell,
   runnerSheets,
 }: {
+  hasRunnerOverrides: boolean;
+  resetRunnerPreview: () => void;
   runnerSheets: RunnerSheetContext[];
   updateRunnerCell: (sheetId: string, address: string, entry: string) => void;
 }) {
@@ -1723,8 +1754,12 @@ function RunnerPreview({
         <div>
           <p className="eyebrow">Runner Preview</p>
           <h2>Generated Form</h2>
+          <p className="runnerSessionNote">Runner edits are temporary and do not rewrite the Sheet defaults.</p>
         </div>
-        <span data-valid={visibleRunnerValid}>{visibleRunnerValid ? "Ready" : "Failed Validation"}</span>
+        <div className="runnerHeaderActions">
+          <span data-valid={visibleRunnerValid}>{visibleRunnerValid ? "Ready" : "Failed Validation"}</span>
+          <button type="button" onClick={resetRunnerPreview} disabled={!hasRunnerOverrides}>Reset Runner Preview</button>
+        </div>
       </div>
 
       <div className={`runnerGrid ${outputGroups.length === 0 ? "runnerGridSingle" : ""}`}>
@@ -1938,7 +1973,7 @@ function HelpPanel() {
             <li>Build the calculator in the grid with normal values and formulas.</li>
             <li>Verify the math works in the Sheet view.</li>
             <li>Name important cells to promote them to Smart Cells.</li>
-            <li>Set role, value type, input control, display label, annotation, dropdown options, or rule text in the inspector.</li>
+            <li>Set role, value type, input control, display label, annotation, dropdown options, and Runner Visibility in the inspector.</li>
             <li>Turn on Surface to runner only for the cells the runner should see.</li>
             <li>Use Runner Preview to test the controlled form.</li>
           </ol>
@@ -1946,24 +1981,21 @@ function HelpPanel() {
 
         <article>
           <h3>Roles</h3>
-          <p>Roles describe how a Smart Cell behaves and how it should be grouped for the runner.</p>
+          <p>Roles describe how a Smart Cell behaves and how it should be grouped for the runner. The core native path is inputs, formulas, and outputs.</p>
           <ul>
             <li><code>input</code>: a value supplied by an admin or runner.</li>
             <li><code>formula</code>: internal calculated logic.</li>
             <li><code>output</code>: a calculated or entered result.</li>
-            <li><code>lookup</code>: a prototype value resolved from an embedded lookup table.</li>
-            <li><code>action</code>: a runner-facing shop note or required action.</li>
-            <li><code>validation</code>: PASS or FAIL rule result.</li>
-            <li><code>compliance</code>: OK or WARN review result.</li>
           </ul>
-          <p>The current lookup role is useful for small demos, but imported shop calculators point toward first-class Reference Tables instead of large hidden lookup tables inside one Smart Cell.</p>
+          <p>Lookup, action, validation, and compliance roles are advanced prototype roles. Normal lookup formulas and conditional text outputs should be used first until those roles are redesigned around reference data, automation, and formal run status.</p>
         </article>
 
         <article>
           <h3>Inputs And Dropdowns</h3>
-          <p>Input Smart Cells can use a free text control or a controlled dropdown control. Choose Dropdown in Input Control, then add short embedded choices in the inspector with one option per line or comma-separated values.</p>
+          <p>Input Smart Cells can use free text, dropdown, or checkbox controls. Choose Dropdown for short option lists, or Checkbox for true/false runner controls.</p>
           <ul>
             <li>Dropdowns render directly in the grid.</li>
+            <li>Checkboxes render directly in the grid and Runner Preview.</li>
             <li>The same dropdown options render in Runner Preview.</li>
             <li>Use Display Label to make runner fields readable without changing formula names.</li>
             <li>Imported workbook cells with simple typed lists or same-workbook range lists are snapshotted into embedded dropdown options.</li>
@@ -2052,15 +2084,14 @@ function HelpPanel() {
 
         <article>
           <h3>Runner Preview</h3>
-          <p>Runner Preview is generated from surfaced Smart Cells. It hides normal coordinate cells and empty optional sections, then groups surfaced inputs, outputs, actions, review flags, and validation by Sheet when needed.</p>
+          <p>Runner Preview is generated from surfaced Smart Cells. It hides normal coordinate cells and empty optional sections, then groups surfaced inputs and outputs by Sheet when needed.</p>
           <ul>
-            <li>Inputs become editable runner fields.</li>
+            <li>Inputs become editable runner-session fields.</li>
             <li>Outputs show calculated results.</li>
-            <li>Action cells show shop notes or required actions.</li>
-            <li>Validation cells show PASS or FAIL.</li>
-            <li>Compliance cells show OK or WARN.</li>
-            <li>Empty output, action, review, and validation sections stay hidden so the runner view stays focused.</li>
-            <li>The bottom summary appears only when there are surfaced results or review warnings.</li>
+            <li>Runner edits do not rewrite the admin Sheet defaults.</li>
+            <li>Use normal formulas such as <code>IF</code> for simple runner messages and conditional text outputs.</li>
+            <li>Empty output sections stay hidden so the runner view stays focused.</li>
+            <li>The bottom summary follows the active view: Sheet defaults on Sheet view, runner-session values on Runner Preview.</li>
           </ul>
         </article>
 
@@ -2071,31 +2102,20 @@ function HelpPanel() {
             <li>Set the control Smart Cell to role input, value type boolean, input control checkbox, and Surface to runner.</li>
             <li>On another surfaced Smart Cell, use Runner Visibility to choose Show when the checkbox is checked.</li>
             <li>Use Runner Section for a short heading such as Dormers when several conditional fields belong together.</li>
-            <li>Hidden conditional validation and compliance messages do not appear in Runner Preview.</li>
+            <li>Hidden conditional messages do not appear in Runner Preview.</li>
             <li>Runner-entered values are temporary. When a conditional input hides, its runner value returns to the Sheet default.</li>
             <li>Hiding a Smart Cell does not remove its value from formulas. Use <code>IF</code> when optional values should change totals.</li>
           </ul>
         </article>
 
         <article>
-          <h3>Validation vs Compliance</h3>
-          <p>Validation and compliance are intentionally different. Validation is for run failure; compliance is for warning the runner. Math should still run where possible.</p>
+          <h3>Advanced Prototype Roles</h3>
+          <p>Lookup, action, validation, and compliance roles are still prototype-level. Use normal formulas, surfaced outputs, and Conditional Runner Sections for the basic native workflow.</p>
           <ul>
-            <li>Validation true means PASS. Validation false means FAIL.</li>
-            <li>Compliance false means OK. Compliance true means WARN.</li>
-            <li>Rule Message is the runner-facing explanation for a FAIL or WARN.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Lookup Cells</h3>
-          <p>Lookup Smart Cells are a Quoin-native way to expose and audit a lookup table, but they are not required for spreadsheet lookup formulas. Use normal formulas for calculator compatibility. Use lookup Smart Cells only when the lookup itself needs named inputs, editable criteria, runner visibility, or clearer audit structure.</p>
-          <ul>
-            <li>Use criteria columns to match input Smart Cell names.</li>
-            <li>Choose an output column to return the lookup result.</li>
-            <li>Paste tabular data from a spreadsheet into the lookup table editor.</li>
-            <li>A lookup miss shows <code>#ERR</code> so missing data is visible.</li>
-            <li>Do not use the embedded lookup editor for thousands of rows. Large imported data Sheets should become Reference Tables in a later workflow.</li>
+            <li>Use <code>VLOOKUP</code> and <code>XLOOKUP</code> as normal spreadsheet formulas for imported calculator compatibility.</li>
+            <li>Use surfaced text outputs for runner notes until action automation is defined.</li>
+            <li>Use conditional outputs for simple warnings until formal validation/compliance run status is redesigned.</li>
+            <li>Large lookup data should move toward visible Reference Tables or CSV-ingested datasets, not hidden cell-local lookup tables.</li>
           </ul>
         </article>
 
@@ -2157,7 +2177,7 @@ function HelpPanel() {
 
         <article>
           <h3>Beam Demo</h3>
-          <p>The default <code>Demo - Beam Selection</code> configuration uses fake data only. It shows the intended flow: runner inputs for drawing conditions, calculated context, lookup recommendations, shop action notes, validation, and compliance warnings.</p>
+          <p>The default <code>Demo - Beam Selection</code> configuration uses fake data only. It shows the intended flow: runner inputs for drawing conditions, calculated context, lookup-style recommendations, and surfaced runner outputs.</p>
         </article>
 
         <article>
@@ -2936,6 +2956,10 @@ function applyCellPatch(cell: GridCell, patch: Partial<GridCell>): GridCell {
   next.inputOptions = next.inputOptions ?? [];
   next.inputControl = next.inputControl ?? (next.inputOptions.length > 0 ? "dropdown" : "freeText");
 
+  if (patch.entry !== undefined && patch.type === undefined && !cell.name) {
+    next.type = inferPrimitiveEntryType(next.entry, next.type);
+  }
+
   if (hasName && hasFormulaEntry && next.role === "input" && patch.role === undefined) {
     next.role = "formula";
   }
@@ -2955,6 +2979,14 @@ function dropdownOptionsForCell(cell: GridCell): string[] {
   if (!isDropdownCell(cell)) return [];
   if (cell.entry && !cell.inputOptions.includes(cell.entry)) return [cell.entry, ...cell.inputOptions];
   return cell.inputOptions;
+}
+
+function inferPrimitiveEntryType(entry: string, fallback: SmartCellType): SmartCellType {
+  const trimmed = entry.trim();
+  if (!trimmed || trimmed.startsWith("=")) return fallback;
+  if (/^(true|false)$/i.test(trimmed)) return "boolean";
+  const numericValue = Number(trimmed);
+  return Number.isFinite(numericValue) ? "number" : "text";
 }
 
 function toEngineCells(cells: Record<string, GridCell>): EngineCell[] {

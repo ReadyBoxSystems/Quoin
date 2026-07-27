@@ -775,7 +775,10 @@ function sumValues(values: unknown[]): number {
 }
 
 function countNumericValues(values: unknown[]): number {
-  return numericValues(values).length;
+  return values.flatMap((value) => {
+    if (Array.isArray(value)) return countNumericValues(value);
+    return typeof value === "number" && Number.isFinite(value) ? 1 : 0;
+  }).reduce((total, value) => total + value, 0);
 }
 
 function averageValues(values: unknown[]): number {
