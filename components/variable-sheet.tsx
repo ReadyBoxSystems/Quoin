@@ -54,6 +54,13 @@ interface VisibilityControlOption {
   sheetName: string;
 }
 
+interface ReferenceOption {
+  address: string;
+  key: string;
+  reference: string;
+  value: CellValue;
+}
+
 const beamLookup: LookupConfig = {
   inputColumn: "design_span",
   inputReference: "design_span",
@@ -220,6 +227,7 @@ export function VariableSheet() {
   const [isDirty, setIsDirty] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState("B2");
   const [editingAddress, setEditingAddress] = useState<string | null>(null);
+  const [isFormulaBarActive, setIsFormulaBarActive] = useState(false);
   const [draftEntry, setDraftEntry] = useState("");
   const [isLoaded, setIsLoaded] = useState(false);
   const [activeView, setActiveView] = useState<"sheet" | "runner" | "help">("sheet");
@@ -302,7 +310,10 @@ export function VariableSheet() {
     [cells, columns, result.errors, result.values, rowCount, ruleStateMap],
   );
   const columnWidths = useMemo(() => buildColumnWidths(cells, displayValues, columns, rowCount), [cells, columns, displayValues, rowCount]);
-  const referenceOptions = useMemo(() => buildReferenceOptions(cells, displayValues, columns, rowCount), [cells, columns, displayValues, rowCount]);
+  const referenceOptions = useMemo(
+    () => buildWorkbookReferenceOptions(visibleSheets, workbookResult, activeSheetId),
+    [activeSheetId, visibleSheets, workbookResult],
+  );
   const filteredReferenceOptions = useMemo(() => {
     const query = getReferenceQuery(draftEntry);
     const normalized = query.toLowerCase();
@@ -313,8 +324,9 @@ export function VariableSheet() {
     });
   }, [draftEntry, referenceOptions]);
   const visibleReferenceOptions = useMemo(() => {
-    return filteredReferenceOptions.filter((option) => option.address !== editingAddress).slice(0, 10);
-  }, [editingAddress, filteredReferenceOptions]);
+    const editingKey = activeSheet ? referenceOptionKey(activeSheet.id, editingAddress ?? "") : "";
+    return filteredReferenceOptions.filter((option) => option.key !== editingKey).slice(0, 10);
+  }, [activeSheet, editingAddress, filteredReferenceOptions]);
   const issueMap = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const issue of [...result.errors, ...result.warnings]) {
@@ -386,9 +398,9 @@ export function VariableSheet() {
   }, [visibleRunnerKeys]);
 
   useEffect(() => {
-    if (editingAddress || activeView !== "sheet") return;
+    if (editingAddress || isFormulaBarActive || activeView !== "sheet") return;
     cellRefs.current[selectedAddress]?.focus();
-  }, [activeView, editingAddress, selectedAddress]);
+  }, [activeView, editingAddress, isFormulaBarActive, selectedAddress]);
 
   useEffect(() => {
     setActiveReferenceIndex(0);
@@ -552,6 +564,7 @@ export function VariableSheet() {
 
   function startEditing(address: string, replacement?: string) {
     const cell = getCell(cells, address);
+    setIsFormulaBarActive(false);
     setSelectedAddress(address);
     setEditingAddress(address);
     setDraftEntry(replacement ?? cell.entry);
@@ -560,10 +573,12 @@ export function VariableSheet() {
   function commitEditing(nextAddress?: string) {
     if (!editingAddress) {
       if (nextAddress) setSelectedAddress(nextAddress);
+      setIsFormulaBarActive(false);
       return;
     }
     updateCell(editingAddress, { entry: draftEntry });
     setEditingAddress(null);
+    setIsFormulaBarActive(false);
     if (nextAddress) setSelectedAddress(nextAddress);
   }
 
@@ -582,6 +597,7 @@ export function VariableSheet() {
 
   function cancelEditing() {
     setEditingAddress(null);
+    setIsFormulaBarActive(false);
     setDraftEntry("");
   }
 
@@ -1207,8 +1223,15 @@ export function VariableSheet() {
                 setDraftEntry(event.target.value);
               }}
               onKeyDown={handleFormulaBarKeyDown}
-              onBlur={() => editingAddress === selectedAddress && commitEditing()}
+              onMouseDown={() => {
+                setIsFormulaBarActive(true);
+              }}
+              onBlur={() => {
+                if (editingAddress === selectedAddress) commitEditing();
+                else setIsFormulaBarActive(false);
+              }}
               onFocus={() => {
+                setIsFormulaBarActive(true);
                 setEditingAddress(selectedAddress);
                 setDraftEntry(editingAddress === selectedAddress ? draftEntry : selectedCell.entry);
               }}
@@ -1220,7 +1243,7 @@ export function VariableSheet() {
                 {visibleReferenceOptions
                   .map((option, index) => (
                     <button
-                      key={option.address}
+                      key={option.key}
                       type="button"
                       data-active={index === activeReferenceIndex}
                       onMouseDown={(event) => {
@@ -3215,23 +3238,59 @@ function buildColumnWidths(
   });
 }
 
-function buildReferenceOptions(cells: Record<string, GridCell>, displayValues: Record<string, CellValue>, columns: string[], rowCount: number) {
-  const options: Array<{ address: string; reference: string; value: CellValue }> = [];
+function buildWorkbookReferenceOptions(sheets: WorkbookSheet[], workbookResult: WorkbookEngineResult, activeSheetId: string): ReferenceOption[] {
+  const options: ReferenceOption[] = [];
+  const nameCounts = new Map<string, number>();
 
-  for (let row = 1; row <= rowCount; row++) {
+  for (const sheet of sheets) {
+    for (const cell of Object.values(sheet.cells)) {
+      if (!cell.name) continue;
+      nameCounts.set(cell.name, (nameCounts.get(cell.name) ?? 0) + 1);
+    }
+  }
+
+  for (const sheet of sheets) {
+    const resultForSheet = workbookResult.sheetResults.find((item) => item.sheetId === sheet.id)?.result ?? executeEngine({ cells: toEngineCells(sheet.cells) });
+    const ruleStateMap = new Map(resultForSheet.ruleStates.map((rule) => [rule.address, rule.state]));
+    const columns = makeColumns(sheet.columnCount);
+    const displayValues = buildDisplayValues(sheet.cells, resultForSheet.values, resultForSheet.errors, ruleStateMap, columns, sheet.rowCount);
+
+    for (const option of buildSheetReferenceOptions(sheet, displayValues, nameCounts, sheet.id === activeSheetId)) {
+      options.push(option);
+    }
+  }
+
+  return options;
+}
+
+function buildSheetReferenceOptions(sheet: WorkbookSheet, displayValues: Record<string, CellValue>, nameCounts: Map<string, number>, isActiveSheet: boolean): ReferenceOption[] {
+  const options: ReferenceOption[] = [];
+  const columns = makeColumns(sheet.columnCount);
+
+  for (let row = 1; row <= sheet.rowCount; row++) {
     for (const column of columns) {
       const address = `${column}${row}`;
-      const cell = getCell(cells, address);
+      const cell = getCell(sheet.cells, address);
       if (!cell.entry && !cell.name) continue;
+      const canUseWorkbookName = Boolean(cell.name && nameCounts.get(cell.name) === 1);
       options.push({
-        address,
-        reference: cell.name || address,
+        address: `${sheet.name}!${address}`,
+        key: referenceOptionKey(sheet.id, address),
+        reference: canUseWorkbookName ? cell.name : isActiveSheet ? address : `${quoteSheetName(sheet.name)}!${address}`,
         value: displayValues[address] ?? "",
       });
     }
   }
 
   return options;
+}
+
+function referenceOptionKey(sheetId: string, address: string): string {
+  return `${sheetId}!${address}`;
+}
+
+function quoteSheetName(name: string): string {
+  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function normalizeFormula(entry: string): string {

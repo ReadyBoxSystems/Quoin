@@ -46,6 +46,8 @@ math.import(
     SQRT: (value: unknown) => Math.sqrt(toNumber(value) ?? 0),
     CEIL: (value: unknown) => Math.ceil(toNumber(value) ?? 0),
     FLOOR: (value: unknown) => Math.floor(toNumber(value) ?? 0),
+    EQ: (left: unknown, right: unknown) => compareFormulaValues(left, right),
+    NE: (left: unknown, right: unknown) => !compareFormulaValues(left, right),
     if: (condition: unknown, valueIfTrue: unknown, valueIfFalse: unknown) => (condition ? valueIfTrue : valueIfFalse),
     IF: (condition: unknown, valueIfTrue: unknown, valueIfFalse: unknown) => (condition ? valueIfTrue : valueIfFalse),
   },
@@ -76,6 +78,8 @@ const ALLOWED_FUNCTIONS = new Set([
   "CEIL",
   "floor",
   "FLOOR",
+  "EQ",
+  "NE",
   "if",
   "IF",
 ]);
@@ -519,7 +523,7 @@ function evaluateExpression(
     const node = parseExpression(expressionWithLookupValues);
     const expressionScope = { ...scope };
     for (const ref of referencesForExpression(expressionWithLookupValues)) {
-      if ((isCellReference(ref) || isScopedCellReference(ref)) && !(ref in expressionScope)) expressionScope[ref] = 0;
+      if ((isCellReference(ref) || isScopedCellReference(ref)) && !(ref in expressionScope)) expressionScope[ref] = null;
     }
     const result = node.evaluate(expressionScope);
     return normalizeValue(result);
@@ -669,9 +673,7 @@ function rangeValues(expression: string, scope: Record<string, CellValue>): Cell
 }
 
 function lookupMatches(left: CellValue, right: CellValue): boolean {
-  if (left === right) return true;
-  if (left === null || right === null) return false;
-  return String(left) === String(right);
+  return compareFormulaValues(left, right);
 }
 
 function literalForFormula(value: CellValue): string {
@@ -806,7 +808,82 @@ function toNumber(value: unknown): number | null {
 
 function normalizeExpression(expression: string): string {
   const withoutEquals = expression.trim().startsWith("=") ? expression.trim().slice(1) : expression;
-  return expandCellRanges(withoutEquals);
+  return normalizeExcelTextComparisons(normalizeExcelComparisons(expandCellRanges(withoutEquals)));
+}
+
+function normalizeExcelComparisons(expression: string): string {
+  let next = "";
+  let inString = false;
+
+  for (let index = 0; index < expression.length; index += 1) {
+    const char = expression[index];
+    const following = expression[index + 1] ?? "";
+
+    if (char === '"') {
+      next += char;
+      if (inString && following === '"') {
+        next += following;
+        index += 1;
+        continue;
+      }
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      next += char;
+      continue;
+    }
+
+    if (char === "<" && following === ">") {
+      next += "!=";
+      index += 1;
+      continue;
+    }
+
+    if (char === "=") {
+      const previous = expression[index - 1] ?? "";
+      if (!["<", ">", "=", "!"].includes(previous) && following !== "=") {
+        next += "==";
+        continue;
+      }
+    }
+
+    next += char;
+  }
+
+  return next;
+}
+
+function normalizeExcelTextComparisons(expression: string): string {
+  const stringLiterals: string[] = [];
+  const withPlaceholders = expression.replace(/"(?:""|[^"])*"/g, (literal) => {
+    const placeholder = `__quoin_string_${stringLiterals.length}__`;
+    stringLiterals.push(literal);
+    return placeholder;
+  });
+
+  const referencePattern = "((?:__sheet\\d+_)?[A-Z]+[1-9]\\d*|[A-Za-z_][A-Za-z0-9_]*)";
+  const placeholderPattern = "(__quoin_string_\\d+__)";
+  const referenceThenString = new RegExp(`${referencePattern}\\s*(==|!=)\\s*${placeholderPattern}`, "g");
+  const stringThenReference = new RegExp(`${placeholderPattern}\\s*(==|!=)\\s*${referencePattern}`, "g");
+  const normalized = withPlaceholders
+    .replace(referenceThenString, (_match, left: string, operator: string, right: string) => {
+      return `${operator === "!=" ? "NE" : "EQ"}(${left},${right})`;
+    })
+    .replace(stringThenReference, (_match, left: string, operator: string, right: string) => {
+      return `${operator === "!=" ? "NE" : "EQ"}(${left},${right})`;
+    });
+
+  return stringLiterals.reduce((current, literal, index) => {
+    return current.replaceAll(`__quoin_string_${index}__`, literal);
+  }, normalized);
+}
+
+function compareFormulaValues(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left === null || left === undefined || right === null || right === undefined) return false;
+  return String(left) === String(right);
 }
 
 function expandCellRanges(expression: string): string {
