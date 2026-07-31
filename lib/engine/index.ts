@@ -534,6 +534,10 @@ function evaluateExpression(
 }
 
 function friendlyFormulaError(message: string): string {
+  if (/unexpected end of expression/i.test(message)) {
+    return "Incomplete formula. Finish the formula or remove it.";
+  }
+
   if (/unexpected type of argument in function (multiplyScalar|divideScalar|addScalar|subtractScalar)/i.test(message)) {
     return "This formula tried to do math with a value that is blank, text, or did not calculate.";
   }

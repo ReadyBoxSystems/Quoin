@@ -386,9 +386,10 @@ export function VariableSheet() {
 
   useEffect(() => {
     if (!editingAddress) return;
+    if (isFormulaBarActive) return;
     editInputRef.current?.focus();
     editInputRef.current?.select();
-  }, [editingAddress]);
+  }, [editingAddress, isFormulaBarActive]);
 
   useEffect(() => {
     setRunnerOverrides((current) => {
@@ -1088,6 +1089,7 @@ export function VariableSheet() {
   }
 
   const selectedIssues = issueMap.get(selectedAddress) ?? [];
+  const firstStatusIssue = result.errors[0] ?? result.warnings[0] ?? null;
   const selectedImportSheet = pendingImport?.sheets.find((sheet) => sheet.id === selectedImportSheetId) ?? pendingImport?.sheets[0] ?? null;
   const importReviewItems = pendingImport && selectedImportSheet
     ? pendingImport.reviewItems.concat(importReviewItemsForSheet(pendingImport.names, selectedImportSheet.name))
@@ -1147,7 +1149,10 @@ export function VariableSheet() {
           <button type="button" onClick={clearSheet}>Clear Sheet</button>
           <button type="button" onClick={resetSheet}>Load Demo</button>
           <div className="status" data-valid={result.valid}>
-            {result.valid ? "Engine Ready" : "Engine Error"}
+            <strong>{result.valid ? "Engine Ready" : "Engine Error"}</strong>
+            {!result.valid && firstStatusIssue && (
+              <span>{firstStatusIssue.address}: {firstStatusIssue.message}</span>
+            )}
           </div>
         </div>
       </header>
@@ -1728,6 +1733,7 @@ function Inspector({
 
       {selectedIssues.length > 0 && (
         <div className="issueBox">
+          <strong>Cell Issue</strong>
           {selectedIssues.map((issue) => (
             <p key={issue}>{issue}</p>
           ))}
@@ -3207,7 +3213,7 @@ function buildDisplayValues(
       } else if (cell.role === "compliance") {
         display[address] = ruleState === "warn" ? "WARN" : ruleState === "error" ? "#ERR" : ruleState === "ok" ? "OK" : "";
       } else if (isFormula || cell.role === "lookup" || cell.role === "action") {
-        display[address] = values[cell.name || address] ?? (errorAddresses.has(address) ? "#ERR" : "");
+        display[address] = errorAddresses.has(address) ? "#ERR" : values[cell.name || address] ?? "";
       } else {
         display[address] = parseCellValue(cell.entry, cell.type);
       }

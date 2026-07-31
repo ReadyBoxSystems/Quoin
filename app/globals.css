@@ -130,14 +130,29 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 4px;
   color: var(--warn-ink);
+  display: grid;
   font-size: 13px;
   font-weight: 700;
+  gap: 2px;
+  max-width: 360px;
   padding: 8px 10px;
-  white-space: nowrap;
 }
 
 .status[data-valid="true"] {
   color: var(--ok);
+}
+
+.status strong,
+.status span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status span {
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .importPanel {
