@@ -242,7 +242,9 @@ export function VariableSheet() {
   const [importError, setImportError] = useState("");
   const [dropdownOptionsDraft, setDropdownOptionsDraft] = useState("");
   const [runnerOverrides, setRunnerOverrides] = useState<RunnerOverrides>({});
+  const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const configSelectRef = useRef<HTMLSelectElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const cellRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -287,10 +289,6 @@ export function VariableSheet() {
   const result = useMemo(
     () => workbookResult.sheetResults.find((item) => item.sheetId === activeSheet?.id)?.result ?? executeEngine({ cells: engineCells }),
     [activeSheet?.id, engineCells, workbookResult],
-  );
-  const sheetRunnerSheets = useMemo(
-    () => buildRunnerSheetContexts(visibleSheets, workbookResult),
-    [visibleSheets, workbookResult],
   );
   const runnerSheets = useMemo(
     () => buildRunnerSheetContexts(runnerVisibleSheets, runnerWorkbookResult),
@@ -340,12 +338,9 @@ export function VariableSheet() {
     () => buildDependencySummary(cells, selectedAddress),
     [cells, selectedAddress],
   );
-  const summaryResult = activeView === "runner" ? runnerWorkbookResult : workbookResult;
-  const summaryRunnerSheets = activeView === "runner" ? runnerSheets : sheetRunnerSheets;
-
   useEffect(() => {
     setDropdownOptionsDraft(selectedDropdownOptionsText);
-  }, [selectedAddress, selectedDropdownOptionsText]);
+  }, [selectedAddress]);
 
   useEffect(() => {
     try {
@@ -479,12 +474,6 @@ export function VariableSheet() {
     const renameCells = (source: Record<string, GridCell>) => renameVisibilityConditionReferences(source, oldName, newName);
     setCells((current) => renameCells(current));
     setSheets((current) => current.map((sheet) => ({ ...sheet, cells: renameCells(sheet.cells) })));
-  }
-
-  function commitDropdownOptions(address = selectedAddress) {
-    const options = splitInputOptions(dropdownOptionsDraft);
-    updateCell(address, { inputOptions: options });
-    setDropdownOptionsDraft(options.join("\n"));
   }
 
   function clearCell(address: string) {
@@ -1098,35 +1087,93 @@ export function VariableSheet() {
   return (
     <>
       <header className="topbar">
-        <div>
+        <div className="productMark">
           <p className="eyebrow">Quoin Core</p>
           <h1>Variable Sheet</h1>
         </div>
-        <div className="toolbar">
-          <div className="configBar" aria-label="Local configurations">
-            <select
-              aria-label="Load configuration"
-              value={activeConfigId}
-              onChange={(event) => handleConfigurationChange(event.target.value)}
-            >
-              {configurations.map((configuration) => (
-                <option key={configuration.id} value={configuration.id}>{configuration.name}</option>
-              ))}
-            </select>
-            <input
-              aria-label="Configuration name"
-              value={configName}
-              onChange={(event) => {
-                setConfigName(event.target.value);
-                setIsDirty(true);
-              }}
-            />
-            {isDirty && <span>Unsaved</span>}
-          </div>
-          <button type="button" onClick={createConfiguration}>New</button>
+        <nav className="menuBar" aria-label="Application commands">
+          <CommandMenu label="File">
+            <button type="button" onClick={createConfiguration}>New configuration</button>
+            <button type="button" onClick={() => configSelectRef.current?.focus()}>Open local configuration</button>
+            <button type="button" onClick={saveConfiguration}>Save</button>
+            <button type="button" onClick={duplicateConfiguration}>Duplicate</button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+              {isImporting ? "Importing..." : "Import Workbook"}
+            </button>
+            <button type="button" className="dangerCommand" onClick={deleteConfiguration}>Delete configuration</button>
+          </CommandMenu>
+          {activeView === "sheet" && (
+            <>
+              <CommandMenu label="Edit">
+                <button type="button" onClick={() => copyCell(selectedAddress)}>Copy Cell</button>
+                <button type="button" onClick={() => pasteCopiedCell(selectedAddress)} disabled={!copiedAddress}>Paste Cell</button>
+                <button type="button" onClick={() => fillDown(selectedAddress)}>Fill Down</button>
+              </CommandMenu>
+              <CommandMenu label="Sheet">
+                <button type="button" onClick={addRowBelow}>Add Row</button>
+                <button type="button" onClick={deleteSelectedRow}>Delete Row</button>
+                <button type="button" onClick={addColumnRight}>Add Column</button>
+                <button type="button" onClick={deleteSelectedColumn}>Delete Column</button>
+                <button type="button" className="dangerCommand" onClick={clearSheet}>Clear Sheet</button>
+              </CommandMenu>
+            </>
+          )}
+          <CommandMenu label="View">
+            <button type="button" onClick={() => setActiveView("sheet")}>Sheet</button>
+            <button type="button" onClick={() => setActiveView("runner")}>Runner Preview</button>
+            {activeView === "sheet" && (
+              <button type="button" onClick={() => setIsInspectorOpen((current) => !current)}>
+                {isInspectorOpen ? "Hide Inspector" : "Show Inspector"}
+              </button>
+            )}
+          </CommandMenu>
+          <CommandMenu label="Help">
+            <button type="button" onClick={() => setActiveView("help")}>Quick start and Help</button>
+            <button type="button" onClick={resetSheet}>Load Demo</button>
+          </CommandMenu>
+        </nav>
+      </header>
+
+      <div className="everydayToolbar">
+        <div className="configBar" aria-label="Local configurations">
+          <select
+            ref={configSelectRef}
+            aria-label="Load configuration"
+            value={activeConfigId}
+            onChange={(event) => handleConfigurationChange(event.target.value)}
+          >
+            {configurations.map((configuration) => (
+              <option key={configuration.id} value={configuration.id}>{configuration.name}</option>
+            ))}
+          </select>
+          <input
+            aria-label="Configuration name"
+            value={configName}
+            onChange={(event) => {
+              setConfigName(event.target.value);
+              setIsDirty(true);
+            }}
+          />
+          {isDirty && <span>Unsaved</span>}
+        </div>
+        <div className="toolbarActions">
           <button type="button" onClick={saveConfiguration}>Save</button>
-          <button type="button" onClick={duplicateConfiguration}>Duplicate</button>
-          <button type="button" onClick={deleteConfiguration}>Delete</button>
+          <button type="button" onClick={undoCells} disabled={undoStack.length === 0}>Undo</button>
+          <button type="button" onClick={redoCells} disabled={redoStack.length === 0}>Redo</button>
+        </div>
+        <div className="viewTabs" role="tablist" aria-label="Quoin surfaces">
+          <button type="button" data-active={activeView === "sheet"} onClick={() => setActiveView("sheet")}>Sheet</button>
+          <button type="button" data-active={activeView === "runner"} onClick={() => setActiveView("runner")}>Runner</button>
+        </div>
+        <div className="status" data-valid={result.valid}>
+          <strong>{result.valid ? "Engine Ready" : "Engine Error"}</strong>
+          {!result.valid && firstStatusIssue && (
+            <span>{firstStatusIssue.address}: {firstStatusIssue.message}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="fileInputHost">
           <input
             ref={fileInputRef}
             type="file"
@@ -1134,28 +1181,7 @@ export function VariableSheet() {
             className="fileInput"
             onChange={handleImportFileChange}
           />
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
-            {isImporting ? "Importing..." : "Import Workbook"}
-          </button>
-          <button type="button" onClick={undoCells} disabled={undoStack.length === 0}>Undo</button>
-          <button type="button" onClick={redoCells} disabled={redoStack.length === 0}>Redo</button>
-          <button type="button" onClick={() => copyCell(selectedAddress)}>Copy Cell</button>
-          <button type="button" onClick={() => pasteCopiedCell(selectedAddress)} disabled={!copiedAddress}>Paste Cell</button>
-          <button type="button" onClick={() => fillDown(selectedAddress)}>Fill Down</button>
-          <button type="button" onClick={addRowBelow}>Add Row</button>
-          <button type="button" onClick={deleteSelectedRow}>Delete Row</button>
-          <button type="button" onClick={addColumnRight}>Add Column</button>
-          <button type="button" onClick={deleteSelectedColumn}>Delete Column</button>
-          <button type="button" onClick={clearSheet}>Clear Sheet</button>
-          <button type="button" onClick={resetSheet}>Load Demo</button>
-          <div className="status" data-valid={result.valid}>
-            <strong>{result.valid ? "Engine Ready" : "Engine Error"}</strong>
-            {!result.valid && firstStatusIssue && (
-              <span>{firstStatusIssue.address}: {firstStatusIssue.message}</span>
-            )}
-          </div>
-        </div>
-      </header>
+      </div>
 
       {(pendingImport || importError) && (
         <section className="importPanel" aria-label="Workbook import">
@@ -1202,18 +1228,6 @@ export function VariableSheet() {
 
         </section>
       )}
-
-      <div className="viewTabs" role="tablist" aria-label="Quoin surfaces">
-        <button type="button" data-active={activeView === "sheet"} onClick={() => setActiveView("sheet")}>
-          Sheet
-        </button>
-        <button type="button" data-active={activeView === "runner"} onClick={() => setActiveView("runner")}>
-          Runner Preview
-        </button>
-        <button type="button" data-active={activeView === "help"} onClick={() => setActiveView("help")}>
-          Help
-        </button>
-      </div>
 
       {activeView === "sheet" ? (
         <>
@@ -1273,8 +1287,13 @@ export function VariableSheet() {
             switchSheet={switchSheet}
           />
 
-          <div className="authoringLayout">
+          <div className="authoringLayout" data-inspector-open={isInspectorOpen}>
             <section className="spreadsheetFrame" aria-label="Quoin spreadsheet grid">
+              {!isInspectorOpen && (
+                <button className="inspectorReopen" type="button" onClick={() => setIsInspectorOpen(true)}>
+                  Show Inspector
+                </button>
+              )}
               <div
                 className="spreadsheetGrid"
                 style={{
@@ -1316,50 +1335,52 @@ export function VariableSheet() {
               </div>
             </section>
 
-            <Inspector
-              clearCell={clearCell}
-              dependencySummary={dependencySummary}
-              displayValue={displayValues[selectedAddress] ?? ""}
-              dropdownOptionsDraft={dropdownOptionsDraft}
-              setDropdownOptionsDraft={setDropdownOptionsDraft}
-              commitDropdownOptions={commitDropdownOptions}
-              selectedAddress={selectedAddress}
-              selectedCell={selectedCell}
-              selectedIssues={selectedIssues}
-              updateCell={updateCell}
-              updateLookup={updateLookup}
-              visibilityControls={visibilityControls}
-            />
+            {isInspectorOpen && (
+              <Inspector
+                clearCell={clearCell}
+                closeInspector={() => setIsInspectorOpen(false)}
+                dependencySummary={dependencySummary}
+                displayValue={displayValues[selectedAddress] ?? ""}
+                dropdownOptionsDraft={dropdownOptionsDraft}
+                setDropdownOptionsDraft={setDropdownOptionsDraft}
+                selectedAddress={selectedAddress}
+                selectedCell={selectedCell}
+                selectedIssues={selectedIssues}
+                updateCell={updateCell}
+                updateLookup={updateLookup}
+                visibilityControls={visibilityControls}
+              />
+            )}
           </div>
         </>
       ) : activeView === "runner" ? (
         <RunnerPreview
+          backToSheet={() => setActiveView("sheet")}
+          configName={configName}
           hasRunnerOverrides={Object.keys(runnerOverrides).length > 0}
           resetRunnerPreview={resetRunnerPreview}
           runnerSheets={runnerSheets}
           updateRunnerCell={updateRunnerCell}
         />
       ) : (
-        <HelpPanel />
+        <HelpPanel loadDemo={resetSheet} />
       )}
 
-      {(Object.keys(summaryResult.outputs).length > 0 || summaryResult.warnings.length > 0) && (
-        <section className={`runnerStrip ${summaryResult.warnings.length === 0 ? "runnerStripSingle" : ""}`}>
-          {Object.keys(summaryResult.outputs).length > 0 && (
-            <div>
-              <span>Surfaced Results</span>
-              <strong>{formatOutputs(summaryResult.outputs)}</strong>
-            </div>
-          )}
-          {summaryResult.warnings.length > 0 && (
-            <div data-kind="warning">
-              <span>Review Needed</span>
-              <strong>{formatWorkbookWarnings(summaryResult.warnings, summaryRunnerSheets)}</strong>
-            </div>
-          )}
-        </section>
-      )}
     </>
+  );
+}
+
+function CommandMenu({ children, label }: { children: ReactNode; label: string }) {
+  return (
+    <details
+      className="commandMenu"
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("button")) event.currentTarget.removeAttribute("open");
+      }}
+    >
+      <summary>{label}</summary>
+      <div>{children}</div>
+    </details>
   );
 }
 
@@ -1415,7 +1436,7 @@ function SheetStrip({
 
 function Inspector({
   clearCell,
-  commitDropdownOptions,
+  closeInspector,
   dependencySummary,
   displayValue,
   dropdownOptionsDraft,
@@ -1428,7 +1449,7 @@ function Inspector({
   visibilityControls,
 }: {
   clearCell: (address: string) => void;
-  commitDropdownOptions: (address?: string) => void;
+  closeInspector: () => void;
   dependencySummary: DependencySummary;
   displayValue: CellValue;
   dropdownOptionsDraft: string;
@@ -1458,6 +1479,7 @@ function Inspector({
           ) : (
             <span className="normalPill">Normal</span>
           )}
+          <button type="button" onClick={closeInspector}>Hide Inspector</button>
           <button type="button" onClick={() => clearCell(selectedAddress)}>Clear Cell</button>
         </div>
       </div>
@@ -1471,14 +1493,9 @@ function Inspector({
 
       <div className="inspectorSection">
         <div className="sectionTitle">
-          <strong>Cell</strong>
-          <span>{selectedCell.name ? "Spreadsheet value and Smart Cell identity" : "Spreadsheet value first"}</span>
+          <strong>{selectedAddress} · {selectedCell.entry.trim().startsWith("=") ? "Formula" : prettifyName(selectedCell.type)}</strong>
+          <span>{selectedCell.name ? "Smart Cell identity" : "Name this cell when it needs formula references or Runner behavior."}</span>
         </div>
-
-        <label>
-          Cell Entry
-          <input value={selectedCell.entry} onChange={(event) => updateCell(selectedAddress, { entry: event.target.value })} />
-        </label>
 
         <div className="detectedTypeRow">
           <span>{selectedCell.entry.trim().startsWith("=") ? "Formula" : "Detected type"}</span>
@@ -1500,24 +1517,15 @@ function Inspector({
           />
         </label>
 
-        {selectedCell.name && (
-          <label>
-            Display Label
-            <input
-              placeholder={prettifyName(selectedCell.name)}
-              value={selectedCell.label}
-              onChange={(event) => updateCell(selectedAddress, { label: event.target.value })}
-            />
-          </label>
-        )}
       </div>
 
       {selectedCell.name && (
-        <div className="inspectorSection smartSection">
-          <div className="sectionTitle">
-            <strong>Smart Behavior</strong>
-            <span>Metadata for runner preview and named calculations</span>
-          </div>
+        <details className="inspectorDisclosure smartSection" open>
+          <summary>
+            <span>Smart Cell</span>
+            <small>Role and Runner surfacing</small>
+          </summary>
+          <div className="inspectorDisclosureBody">
           <div className="inspectorGrid">
             <label>
               Role
@@ -1551,31 +1559,55 @@ function Inspector({
               ))}
               </select>
             </label>
-            {selectedCell.role === "input" && (
-              <label>
-                Input Control
-                <select
-                  value={selectedCell.inputControl}
-                  onChange={(event) => {
-                    const inputControl = event.target.value as InputControl;
-                    const options = inputControl === "dropdown" && selectedCell.inputOptions.length === 0 && selectedCell.entry.trim()
-                      ? [selectedCell.entry.trim()]
-                      : selectedCell.inputOptions;
-                    setDropdownOptionsDraft(options.join("\n"));
-                    updateCell(selectedAddress, {
-                      inputControl,
-                      inputOptions: inputControl === "dropdown" ? options : [],
-                      type: inputControl === "checkbox" ? "boolean" : selectedCell.type,
-                    });
-                  }}
-                >
-                  {inputControlOptions.map((inputControl) => (
-                    <option key={inputControl} value={inputControl}>{labelForInputControl(inputControl)}</option>
-                  ))}
-                </select>
-              </label>
-            )}
           </div>
+
+          {selectedCell.role === "input" && (
+            <details className="nestedDisclosure" open>
+              <summary>Input settings</summary>
+              <div className="nestedDisclosureBody">
+                <label>
+                  Input Control
+                  <select
+                    value={selectedCell.inputControl}
+                    onChange={(event) => {
+                      const inputControl = event.target.value as InputControl;
+                      const options = inputControl === "dropdown" && selectedCell.inputOptions.length === 0 && selectedCell.entry.trim()
+                        ? [selectedCell.entry.trim()]
+                        : selectedCell.inputOptions;
+                      setDropdownOptionsDraft(options.join("\n"));
+                      updateCell(selectedAddress, {
+                        inputControl,
+                        inputOptions: inputControl === "dropdown" ? options : [],
+                        type: inputControl === "checkbox" ? "boolean" : selectedCell.type,
+                      });
+                    }}
+                  >
+                    {inputControlOptions.map((inputControl) => (
+                      <option key={inputControl} value={inputControl}>{labelForInputControl(inputControl)}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {selectedCell.inputControl === "dropdown" && (
+                  <label>
+                    Dropdown Options
+                    <textarea
+                      value={dropdownOptionsDraft}
+                      onBlur={() => setDropdownOptionsDraft(splitInputOptions(dropdownOptionsDraft).join("\n"))}
+                      onChange={(event) => {
+                        const draft = event.target.value;
+                        setDropdownOptionsDraft(draft);
+                        updateCell(selectedAddress, { inputOptions: splitInputOptions(draft) });
+                      }}
+                      placeholder="One short option per line, or comma-separated. Leave blank for free text."
+                      rows={3}
+                    />
+                    <span>Use embedded options for short lists. Longer lists should come from visible reference data in a later reference-table workflow.</span>
+                  </label>
+                )}
+              </div>
+            </details>
+          )}
 
           <div className="surfaceRow">
             <label className="checkLabel">
@@ -1590,11 +1622,17 @@ function Inspector({
           </div>
 
           {selectedCell.surfaced && (
-            <div className="runnerVisibilityBox">
-              <div className="sectionTitle">
-                <strong>Runner Visibility</strong>
-                <span>Optional grouping and conditional display</span>
-              </div>
+            <details className="nestedDisclosure">
+              <summary>Runner appearance</summary>
+              <div className="nestedDisclosureBody">
+              <label>
+                Display Label
+                <input
+                  placeholder={prettifyName(selectedCell.name)}
+                  value={selectedCell.label}
+                  onChange={(event) => updateCell(selectedAddress, { label: event.target.value })}
+                />
+              </label>
               <label>
                 Runner Section
                 <input
@@ -1638,32 +1676,22 @@ function Inspector({
                   <p>This Smart Cell is hidden in Runner Preview until its missing condition source is repaired.</p>
                 </div>
               )}
-            </div>
+              </div>
+            </details>
           )}
 
-          <label>
-            Internal Annotation
-            <textarea
-              value={selectedCell.annotation}
-              onChange={(event) => updateCell(selectedAddress, { annotation: event.target.value })}
-              placeholder="Internal note about what this cell means"
-              rows={4}
-            />
-          </label>
-
-          {selectedCell.role === "input" && selectedCell.inputControl === "dropdown" && (
-            <label>
-              Dropdown Options
-              <textarea
-                value={dropdownOptionsDraft}
-                onBlur={() => commitDropdownOptions(selectedAddress)}
-                onChange={(event) => setDropdownOptionsDraft(event.target.value)}
-                placeholder="One short option per line, or comma-separated. Leave blank for free text."
-                rows={3}
-              />
-              <span>Use embedded options for short lists. Longer lists should come from visible reference data in a later reference-table workflow.</span>
-            </label>
-          )}
+          <details className="nestedDisclosure">
+            <summary>Notes &amp; advanced</summary>
+            <div className="nestedDisclosureBody">
+              <label>
+                Internal Annotation
+                <textarea
+                  value={selectedCell.annotation}
+                  onChange={(event) => updateCell(selectedAddress, { annotation: event.target.value })}
+                  placeholder="Internal note about what this cell means"
+                  rows={4}
+                />
+              </label>
 
           {(selectedCell.role === "validation" || selectedCell.role === "compliance") && (
             <label>
@@ -1676,7 +1704,10 @@ function Inspector({
               />
             </label>
           )}
-        </div>
+            </div>
+          </details>
+          </div>
+        </details>
       )}
 
       {selectedCell.role === "lookup" && selectedCell.name && (
@@ -1702,7 +1733,12 @@ function Inspector({
         <p>{formatCellValue(displayValue)}</p>
       </div>
 
-      <div className="dependencyPanel">
+      <details className="inspectorDisclosure">
+        <summary>
+          <span>Dependencies</span>
+          <small>Upstream and downstream references</small>
+        </summary>
+        <div className="dependencyPanel">
         <div>
           <strong>Depends On</strong>
           {dependencySummary.dependencies.length === 0 ? (
@@ -1729,7 +1765,8 @@ function Inspector({
             ))
           )}
         </div>
-      </div>
+        </div>
+      </details>
 
       {selectedIssues.length > 0 && (
         <div className="issueBox">
@@ -1744,11 +1781,15 @@ function Inspector({
 }
 
 function RunnerPreview({
+  backToSheet,
+  configName,
   hasRunnerOverrides,
   resetRunnerPreview,
   updateRunnerCell,
   runnerSheets,
 }: {
+  backToSheet: () => void;
+  configName: string;
   hasRunnerOverrides: boolean;
   resetRunnerPreview: () => void;
   runnerSheets: RunnerSheetContext[];
@@ -1782,12 +1823,13 @@ function RunnerPreview({
       <div className="runnerHeader">
         <div>
           <p className="eyebrow">Runner Preview</p>
-          <h2>Generated Form</h2>
+          <h2>{configName || "Untitled Configuration"}</h2>
           <p className="runnerSessionNote">Runner edits are temporary and do not rewrite the Sheet defaults.</p>
         </div>
         <div className="runnerHeaderActions">
           <span data-valid={visibleRunnerValid}>{visibleRunnerValid ? "Ready" : "Failed Validation"}</span>
-          <button type="button" onClick={resetRunnerPreview} disabled={!hasRunnerOverrides}>Reset Runner Preview</button>
+          <button type="button" onClick={backToSheet}>Back to Sheet</button>
+          <button type="button" onClick={resetRunnerPreview} disabled={!hasRunnerOverrides}>Reset Preview</button>
         </div>
       </div>
 
@@ -1958,268 +2000,223 @@ function RunnerSectionGroup({
   );
 }
 
-function HelpPanel() {
+function HelpPanel({ loadDemo }: { loadDemo: () => void }) {
   return (
     <section className="helpPanel" aria-label="Quoin help">
       <div className="helpHeader">
         <p className="eyebrow">Help</p>
-        <h2>How Quoin Works</h2>
-        <p>Quoin is a spreadsheet-first prototype for turning shop knowledge into structured, runner-safe workflows. Start by building normal spreadsheet logic, then name important cells when they need meaning, controls, or runner visibility.</p>
+        <h2>Build a spreadsheet. Turn it into a Runner.</h2>
+        <p>Quoin starts with familiar spreadsheet work, then adds structure only where it helps the person using the finished calculator.</p>
       </div>
 
-      <div className="helpGrid">
-        <article>
-          <h3>Core Idea</h3>
-          <p>Quoin should feel familiar to anyone who has used spreadsheets: cells have coordinates, formulas can reference other cells, and imported workbooks keep their Sheet structure. The difference is that named cells can carry metadata, controls, runner labels, validation, and review behavior.</p>
-          <p>The authoring grid is still the source of truth. Build and import calculator logic first, prove the math, then promote the important cells into Smart Cells for runner-facing workflow behavior.</p>
-        </article>
-
-        <article>
-          <h3>Normal Cells</h3>
-          <p>Normal cells use addresses like <code>A1</code> or <code>B12</code>. They can hold labels, numbers, text, booleans, or formulas. They stay in the authoring grid only and do not appear in Runner Preview.</p>
-          <ul>
-            <li>Type directly in a selected cell, double-click a cell, press Enter, or use the formula bar.</li>
-            <li>Use Delete or Backspace to clear the selected cell.</li>
-            <li>Paste tabular data from a spreadsheet into the grid.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Smart Cells</h3>
-          <p>A cell becomes a Smart Cell when you give it a Smart Cell Name in the inspector. Names are formula-safe identifiers such as <code>design_span</code>, while Display Label is the human-facing text such as <code>Design Span (ft)</code>.</p>
-          <ul>
-            <li>Smart Cell names are workbook-scoped when unique.</li>
-            <li>Formulas on any Sheet can reference a unique Smart Cell name directly.</li>
-            <li>Metadata stays in the inspector so the grid remains spreadsheet-first.</li>
-            <li>Naming a cell does not automatically show it to the runner. Turn on Surface to runner when the cell belongs in Runner Preview.</li>
-            <li>Imported workbook dropdown cells are the exception: supported dropdown inputs are surfaced automatically so the imported control remains visible where it is used.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Basic Workflow</h3>
-          <ol>
-            <li>Build the calculator in the grid with normal values and formulas.</li>
-            <li>Verify the math works in the Sheet view.</li>
-            <li>Name important cells to promote them to Smart Cells.</li>
-            <li>Set role, value type, input control, display label, annotation, dropdown options, and Runner Visibility in the inspector.</li>
-            <li>Turn on Surface to runner only for the cells the runner should see.</li>
-            <li>Use Runner Preview to test the controlled form.</li>
+      <section className="helpStart" aria-labelledby="help-start-title">
+        <div>
+          <p className="eyebrow">Start Here</p>
+          <h3 id="help-start-title">The Quoin workflow</h3>
+          <ol className="helpWorkflow">
+            <li><strong>Build</strong><span>Enter values and formulas in normal cells.</span></li>
+            <li><strong>Verify</strong><span>Make sure the Sheet calculates correctly.</span></li>
+            <li><strong>Name</strong><span>Promote important cells into Smart Cells.</span></li>
+            <li><strong>Surface</strong><span>Choose what the runner should see.</span></li>
+            <li><strong>Preview</strong><span>Test the generated Runner without changing Sheet defaults.</span></li>
           </ol>
+        </div>
+        <div className="helpConceptExample">
+          <strong>One cell, three decisions</strong>
+          <dl>
+            <div><dt>Name</dt><dd><code>design_span</code> - safe to use in formulas.</dd></div>
+            <div><dt>Display label</dt><dd><code>Design Span (ft)</code> - clear wording for the runner.</dd></div>
+            <div><dt>Surface</dt><dd>Include the cell in Runner Preview.</dd></div>
+          </dl>
+          <button type="button" onClick={loadDemo}>Load the example configuration</button>
+        </div>
+      </section>
+
+      <div className="helpTaskGrid">
+        <article>
+          <p className="helpStep">1 / Author</p>
+          <h3>Build the Sheet</h3>
+          <p>Normal cells hold labels, values, booleans, and formulas. They remain in the authoring grid unless you promote them.</p>
+          <ul>
+            <li>Type in a cell, double-click it, press Enter, or use the formula bar.</li>
+            <li>Use Sheet tabs to organize a workbook and paste tabular data into the grid.</li>
+            <li>Use Undo/Redo, Copy/Paste, and Fill Down from the toolbar, menus, or keyboard.</li>
+          </ul>
+          <details>
+            <summary>Keyboard shortcuts</summary>
+            <ul>
+              <li>Arrow keys move the selection; Enter or F2 starts editing.</li>
+              <li>Tab moves right; Shift+Tab moves left.</li>
+              <li>Ctrl+Z and Ctrl+Y undo and redo.</li>
+              <li>Ctrl+C, Ctrl+V, and Ctrl+D copy, paste, and fill down.</li>
+              <li>Delete or Backspace clears the selected cell.</li>
+            </ul>
+          </details>
         </article>
 
         <article>
-          <h3>Roles</h3>
-          <p>Roles describe how a Smart Cell behaves and how it should be grouped for the runner. The core native path is inputs, formulas, and outputs.</p>
+          <p className="helpStep">2 / Structure</p>
+          <h3>Create Smart Cells</h3>
+          <p>Giving a cell a Smart Cell Name adds formula-safe identity and opens its workflow settings in the inspector.</p>
           <ul>
-            <li><code>input</code>: a value supplied by an admin or runner.</li>
-            <li><code>formula</code>: internal calculated logic.</li>
-            <li><code>output</code>: a calculated or entered result.</li>
+            <li><strong>Input</strong> accepts an admin or runner value.</li>
+            <li><strong>Formula</strong> holds internal calculated logic.</li>
+            <li><strong>Output</strong> presents a calculated or entered result.</li>
           </ul>
-          <p>Lookup, action, validation, and compliance roles are advanced prototype roles. Normal lookup formulas and conditional text outputs should be used first until those roles are redesigned around reference data, automation, and formal run status.</p>
+          <p>Keep names formula-safe; use Display Label for human-facing wording.</p>
+          <details>
+            <summary>Dropdowns and checkboxes</summary>
+            <ul>
+              <li>Use Dropdown for a short embedded list of choices.</li>
+              <li>Use Checkbox for true/false inputs.</li>
+              <li>Both controls appear in the Sheet and Runner Preview.</li>
+              <li>Long option lists should eventually come from visible reference data.</li>
+            </ul>
+          </details>
         </article>
 
         <article>
-          <h3>Inputs And Dropdowns</h3>
-          <p>Input Smart Cells can use free text, dropdown, or checkbox controls. Choose Dropdown for short option lists, or Checkbox for true/false runner controls.</p>
+          <p className="helpStep">3 / Preview</p>
+          <h3>Build the Runner</h3>
+          <p>Runner Preview is generated from surfaced Smart Cells across the workbook. Normal and unsurfaced cells remain authoring-only.</p>
           <ul>
-            <li>Dropdowns render directly in the grid.</li>
-            <li>Checkboxes render directly in the grid and Runner Preview.</li>
-            <li>The same dropdown options render in Runner Preview.</li>
-            <li>Use Display Label to make runner fields readable without changing formula names.</li>
-            <li>Imported workbook cells with simple typed lists or same-workbook range lists are snapshotted into embedded dropdown options.</li>
-            <li>Longer option sets should eventually use live visible reference data, named ranges, tables, or CSV-ingested datasets.</li>
+            <li>Runner edits are temporary and do not rewrite Sheet defaults.</li>
+            <li>Reset Preview clears temporary values.</li>
+            <li>Outputs update from runner-session inputs.</li>
+            <li>Back to Sheet returns to authoring.</li>
           </ul>
-        </article>
-
-        <article className="helpFormulaReference">
-          <h3>Supported Formulas</h3>
-          <p>Quoin supports a spreadsheet-compatible subset for common calculator logic. A formula starts with <code>=</code>. The engine evaluates references, ranges, arithmetic, comparisons, common functions, and <code>IF</code>. Unsupported imported formulas stay visible and appear as review items instead of being silently dropped.</p>
-          <h4>References</h4>
-          <p>A reference points a formula at another cell or Smart Cell. Coordinate references use the grid address. Smart Cell references use the workbook-scoped Smart Cell Name.</p>
-          <ul>
-            <li><code>=A1+B1</code> uses coordinate references.</li>
-            <li><code>=B2 * 650</code> multiplies the value in <code>B2</code> by a constant.</li>
-            <li><code>=design_span * design_plf</code> uses Smart Cell names.</li>
-            <li><code>=design_span * 650</code> can reference <code>design_span</code> from another Sheet.</li>
-          </ul>
-          <h4>Cross-Sheet References</h4>
-          <p>Use cross-Sheet references when a formula should point at a coordinate on another Sheet. Sheet names with spaces need single quotes.</p>
-          <ul>
-            <li><code>=Inputs!B2 * Inputs!B3</code> references cells on a Sheet named <code>Inputs</code>.</li>
-            <li><code>='Input Data'!B2 * 3</code> references a Sheet whose name contains a space.</li>
-            <li><code>=design_span * design_plf</code> is usually cleaner when those inputs have unique Smart Cell names.</li>
-          </ul>
-          <h4>Ranges</h4>
-          <p>A range is a group of cells between two addresses. Quoin supports single-column, single-row, and rectangular ranges for common aggregate formulas.</p>
-          <ul>
-            <li><code>=SUM(A1:A5)</code> and <code>=SUM(A1:B3)</code> use ranges.</li>
-            <li><code>=COUNT(A1:A5)</code> counts numeric values in a range.</li>
-            <li><code>=AVERAGE(B2:B10)</code> averages a vertical range.</li>
-            <li><code>=MAX(A1:D1)</code> finds the largest value across a row.</li>
-            <li><code>=SUM(Loads!B3:B5)</code> can aggregate a supported range from another Sheet.</li>
-          </ul>
-          <h4>Functions</h4>
-          <p>Functions perform named operations. Quoin accepts familiar uppercase spreadsheet function names and maps them to deterministic engine behavior.</p>
-          <ul>
-            <li><code>=SUM(A1:A5)</code> adds values.</li>
-            <li><code>=COUNT(A1:A5)</code> counts cells with numeric values and ignores blanks or text.</li>
-            <li><code>=AVERAGE(A1:A5)</code> calculates the mean.</li>
-            <li><code>=MIN(A1:A5)</code> and <code>=MAX(A1:A5)</code> find bounds.</li>
-            <li><code>=ROUND(B6, 2)</code> rounds to two decimal places.</li>
-            <li><code>=ROUNDUP(B6, 0)</code> rounds away from zero, matching a common calculator pattern.</li>
-            <li><code>=ABS(B2)</code>, <code>=SQRT(B2)</code>, <code>=CEIL(B2)</code>, and <code>=FLOOR(B2)</code> cover common numeric cleanup.</li>
-          </ul>
-          <h4>Lookup Formulas</h4>
-          <p><code>VLOOKUP</code> and <code>XLOOKUP</code> are calculation primitives in Quoin. A lookup formula can live in a normal coordinate cell, just like other spreadsheet formulas. You do not have to promote the cell to a lookup Smart Cell just to make the formula calculate.</p>
-          <ul>
-            <li><code>=VLOOKUP(A1,Data!A1:B200,2,FALSE)</code> finds an exact match in the first column of the table range and returns the requested output column.</li>
-            <li><code>=VLOOKUP(A1&amp;"|"&amp;B1,'Beam Data'!F2:G9999,2,FALSE)</code> supports common helper-key patterns used by imported calculators.</li>
-            <li><code>=XLOOKUP(A1,Data!A1:A200,Data!B1:B200)</code> finds an exact match in the lookup range and returns the matching value from the return range.</li>
-            <li>Lookup formulas can participate in larger formulas, such as <code>=VLOOKUP(A1,Data!A1:B20,2,FALSE)*2</code>.</li>
-            <li>Quoin currently supports exact-match lookup behavior. Approximate <code>VLOOKUP</code> and non-exact <code>XLOOKUP</code> match modes are preserved for review.</li>
-          </ul>
-          <h4>Conditions And IF</h4>
-          <p>Comparisons return true or false. <code>IF</code> chooses one value when the condition is true and another value when it is false.</p>
-          <ul>
-            <li><code>=design_span &gt; 14</code> returns a boolean result.</li>
-            <li><code>=IF(A1&gt;10, "review", "ok")</code> uses conditional logic.</li>
-            <li><code>=IF(design_span&gt;14, "review", recommended_beam)</code> combines Smart Cell names and IF.</li>
-            <li><code>=IF(total_line_load&gt;9000, "engineering review", "standard")</code> returns runner-readable text.</li>
-          </ul>
-          <p>Supported aliases include SUM, AVERAGE, MAX, MIN, ROUND, ROUNDUP, ABS, SQRT, CEIL, and FLOOR.</p>
-          <p>Supported lookup functions include exact-match <code>VLOOKUP</code> and exact-match <code>XLOOKUP</code>. These are formula features, not Smart Cell requirements.</p>
-          <h4>Formula Editing Notes</h4>
-          <ul>
-            <li>While typing a formula, the reference popup suggests named Smart Cells and populated coordinates.</li>
-            <li>Copy, paste, and fill-down adjust coordinate references while leaving Smart Cell names unchanged.</li>
-            <li>Deleted row or column references become <code>#REF!</code> so broken formulas remain visible.</li>
-            <li>Renaming a Sheet updates direct cross-Sheet references that use the old Sheet name.</li>
-            <li>Incomplete formulas should not crash the app while you are still typing.</li>
-          </ul>
+          <details>
+            <summary>Conditional sections</summary>
+            <ul>
+              <li>A surfaced checkbox can control whether other surfaced fields appear.</li>
+              <li>Runner Section gives related fields a shared heading.</li>
+              <li>Hidden Runner inputs return to their Sheet defaults.</li>
+              <li>Visibility does not change workbook math; use <code>IF</code> when optional inputs should change totals.</li>
+            </ul>
+          </details>
         </article>
 
         <article>
-          <h3>Sheets</h3>
-          <p>A configuration can contain multiple Sheets. Sheet tabs sit below the formula bar and above the grid. The authoring grid shows one active Sheet at a time, while Runner Preview can gather surfaced Smart Cells from the whole workbook.</p>
-          <ul>
-            <li>Use the Active Sheet field in the Sheet strip to rename the current Sheet.</li>
-            <li>Use coordinate formulas on the current Sheet, such as <code>=A1+B1</code>.</li>
-            <li>Use supported cross-Sheet references, such as <code>=Inputs!B2 * Inputs!B3</code>.</li>
-            <li>Use unique Smart Cell names across Sheets, such as <code>=design_span * design_plf</code>.</li>
-            <li>Column headers stay visible while scrolling down the grid, and row numbers stay visible while scrolling sideways.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Runner Preview</h3>
-          <p>Runner Preview is generated from surfaced Smart Cells. It hides normal coordinate cells and empty optional sections, then groups surfaced inputs and outputs by Sheet when needed.</p>
-          <ul>
-            <li>Inputs become editable runner-session fields.</li>
-            <li>Outputs show calculated results.</li>
-            <li>Runner edits do not rewrite the admin Sheet defaults.</li>
-            <li>Use normal formulas such as <code>IF</code> for simple runner messages and conditional text outputs.</li>
-            <li>Empty output sections stay hidden so the runner view stays focused.</li>
-            <li>The bottom summary follows the active view: Sheet defaults on Sheet view, runner-session values on Runner Preview.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Conditional Runner Sections</h3>
-          <p>A surfaced checkbox input Smart Cell can control whether other surfaced Smart Cells appear in Runner Preview. This is runner visibility only; the Sheet and formulas still exist and calculate normally.</p>
-          <ul>
-            <li>Set the control Smart Cell to role input, value type boolean, input control checkbox, and Surface to runner.</li>
-            <li>On another surfaced Smart Cell, use Runner Visibility to choose Show when the checkbox is checked.</li>
-            <li>Use Runner Section for a short heading such as Dormers when several conditional fields belong together.</li>
-            <li>Hidden conditional messages do not appear in Runner Preview.</li>
-            <li>Runner-entered values are temporary. When a conditional input hides, its runner value returns to the Sheet default.</li>
-            <li>Hiding a Smart Cell does not remove its value from formulas. Use <code>IF</code> when optional values should change totals.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Advanced Prototype Roles</h3>
-          <p>Lookup, action, validation, and compliance roles are still prototype-level. Use normal formulas, surfaced outputs, and Conditional Runner Sections for the basic native workflow.</p>
-          <ul>
-            <li>Use <code>VLOOKUP</code> and <code>XLOOKUP</code> as normal spreadsheet formulas for imported calculator compatibility.</li>
-            <li>Use surfaced text outputs for runner notes until action automation is defined.</li>
-            <li>Use conditional outputs for simple warnings until formal validation/compliance run status is redesigned.</li>
-            <li>Large lookup data should move toward visible Reference Tables or CSV-ingested datasets, not hidden cell-local lookup tables.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Reference Data Direction</h3>
-          <p>Real shop calculators often use large data tabs and lookup formulas. Quoin now calls out likely reference-data Sheets during import so the admin can tell the difference between a calculator Sheet and a data Sheet.</p>
-          <ul>
-            <li>A large Sheet with many rows and no formulas is preserved as a normal Sheet for now and marked as likely reference data.</li>
-            <li>Exact-match <code>VLOOKUP</code> and <code>XLOOKUP</code> formulas are preserved as normal formulas and should calculate without Smart Cell promotion.</li>
-            <li>Review items can still explain lookup source ranges and keys so important lookups can later be rebuilt as visible Reference Tables or audited lookup Smart Cells.</li>
-            <li>Quoin should eventually bind large lookup formulas to visible/imported Reference Tables instead of hiding thousands of rows inside Smart Cell metadata.</li>
-            <li>Runner Preview should show surfaced inputs and results, not raw reference-data rows.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Workbook Import</h3>
-          <p>Import Workbook brings an <code>.xlsx</code> calculator into a new browser-local configuration. The goal is to preserve the workbook calculation surface first, then let you structure it with Quoin Smart Cells.</p>
-          <ul>
-            <li>Workbook Sheets, values, and formulas are preserved.</li>
-            <li>Safe workbook-defined single-cell names can become Smart Cell names.</li>
-            <li>Simple workbook list validations and supported workbook range sources can become dropdown options on imported input Smart Cells.</li>
-            <li>Dropdown-only cells still expand the imported Sheet bounds, so controls outside the normal used range remain visible.</li>
-            <li>Merged ranges, named ranges, external workbook links, structured table references, spill markers, and other risky features appear as review items.</li>
-            <li>Unsupported formulas remain visible instead of being silently dropped.</li>
-            <li>Review items try to explain the repair path, such as changing approximate lookup behavior to explicit exact-match logic or replacing <code>INDIRECT</code> with direct references.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Formula Review Items</h3>
-          <p>Imported workbook formulas are classified conservatively. Quoin supports the common subset it can evaluate deterministically and preserves the rest for review.</p>
-          <ul>
-            <li><code>VLOOKUP</code>: exact-match lookups are supported as formulas. Approximate or omitted match-mode lookups need manual confirmation because omitted match mode is often approximate in spreadsheet tools.</li>
-            <li><code>XLOOKUP</code>: exact-match lookups are supported as formulas. Non-exact match modes need manual confirmation.</li>
-            <li><code>IFERROR</code> and <code>IFNA</code>: decide what fallback is safe, then model it with explicit <code>IF</code>, validation, or review messaging.</li>
-            <li><code>INDIRECT</code> and <code>OFFSET</code>: replace dynamic address logic with direct references or a Reference Table selection.</li>
-            <li><code>SUMIFS</code>, <code>COUNTIFS</code>, and similar criteria formulas: move the criteria ranges into a Reference Table or helper calculation before modeling the aggregate.</li>
-            <li>Date and time functions need a separate date-semantics decision before Quoin should evaluate them.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Patch Notes</h3>
-          <p>Recent prototype changes are tracked here so testing can focus on what changed.</p>
-          <ul>
-            <li><strong>Lookup formulas:</strong> <code>VLOOKUP</code> and <code>XLOOKUP</code> now calculate as normal formulas. A lookup is a calculation primitive, not a structural decision.</li>
-            <li><strong>Exact-match support:</strong> Quoin supports exact-match <code>VLOOKUP(...,FALSE)</code>, <code>VLOOKUP(...,0)</code>, and default/exact <code>XLOOKUP</code> behavior.</li>
-            <li><strong>Helper keys:</strong> Imported formulas using concatenated keys such as <code>A1&amp;"|"&amp;B1</code> can evaluate against preserved reference-data Sheets.</li>
-            <li><strong>Import behavior:</strong> Lookup formulas stay as formula cells instead of being converted into lookup Smart Cells. Review items now point out when lookup behavior needs confirmation.</li>
-            <li><strong>Reference data:</strong> Large data tabs remain visible as Sheets for now. Future Reference Tables should make those data sources easier to audit and bind.</li>
-          </ul>
-        </article>
-
-        <article>
-          <h3>Local Configurations</h3>
-          <p>Configurations are stored in this browser for now. New, Save, Duplicate, Delete, rename, Load Demo, and Import Workbook all operate locally. Database-backed publishing, execution records, auth, and audit reports are later phases.</p>
-        </article>
-
-        <article>
-          <h3>Beam Demo</h3>
-          <p>The default <code>Demo - Beam Selection</code> configuration uses fake data only. It shows the intended flow: runner inputs for drawing conditions, calculated context, lookup-style recommendations, and surfaced runner outputs.</p>
-        </article>
-
-        <article>
-          <h3>Keyboard Shortcuts</h3>
-          <ul>
-            <li>Arrow keys move the selected cell.</li>
-            <li>Enter or F2 edits the selected cell.</li>
-            <li>Tab moves right; Shift+Tab moves left.</li>
-            <li>Ctrl+Z and Ctrl+Y undo and redo sheet edits.</li>
-            <li>Ctrl+C, Ctrl+V, and Ctrl+D support cell copy, paste, and fill-down behavior.</li>
-          </ul>
+          <p className="helpStep">4 / Bring Work In</p>
+          <h3>Import a Workbook</h3>
+          <p>Import Workbook creates a new browser-local configuration from an <code>.xlsx</code> file. Preserve the calculator first, then structure it with Quoin.</p>
+          <ol>
+            <li>Import the workbook and choose the first Sheet.</li>
+            <li>Review preserved Sheets, values, formulas, names, and dropdowns.</li>
+            <li>Inspect review items and repair formulas where needed.</li>
+            <li>Promote important cells into Smart Cells.</li>
+          </ol>
+          <details>
+            <summary>What import preserves and reviews</summary>
+            <ul>
+              <li>Sheets, ordinary values, formulas, and supported dropdown lists are preserved.</li>
+              <li>Safe single-cell workbook names can become Smart Cell names.</li>
+              <li>Merged ranges, external links, structured references, spill markers, and unsupported formulas produce review items.</li>
+              <li>Unsupported formulas remain visible instead of being silently discarded.</li>
+            </ul>
+          </details>
         </article>
       </div>
+
+      <section className="helpReference">
+        <div className="helpSectionHeading">
+          <p className="eyebrow">Reference</p>
+          <h3>Formula Reference</h3>
+          <p>Quoin supports common deterministic spreadsheet formulas. Formulas begin with <code>=</code>.</p>
+        </div>
+        <details className="helpDisclosure" open>
+          <summary>References and ranges</summary>
+          <div><ul>
+            <li><code>=A1+B1</code> uses coordinates on the active Sheet.</li>
+            <li><code>=design_span * design_plf</code> uses workbook-scoped Smart Cell names.</li>
+            <li><code>=Inputs!B2 * Inputs!B3</code> uses another Sheet.</li>
+            <li><code>='Input Data'!B2 * 3</code> quotes a Sheet name containing spaces.</li>
+            <li><code>=SUM(A1:B3)</code> and <code>=COUNT(Loads!B3:B5)</code> use ranges.</li>
+          </ul></div>
+        </details>
+        <details className="helpDisclosure">
+          <summary>Common functions</summary>
+          <div className="helpTableScroll"><table className="helpFunctionTable">
+            <thead><tr><th>Group</th><th>Supported examples</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Aggregates</td><td><code>SUM</code>, <code>COUNT</code>, <code>AVERAGE</code>, <code>MIN</code>, <code>MAX</code></td><td><code>COUNT</code> ignores blanks and text.</td></tr>
+              <tr><td>Numeric</td><td><code>ROUND</code>, <code>ROUNDUP</code>, <code>ABS</code>, <code>SQRT</code>, <code>CEIL</code>, <code>FLOOR</code></td><td>Common numeric cleanup.</td></tr>
+              <tr><td>Conditions</td><td><code>IF</code> and comparisons</td><td>Numeric and text comparisons.</td></tr>
+              <tr><td>Lookups</td><td>Exact <code>VLOOKUP</code>, exact/default <code>XLOOKUP</code></td><td>Approximate matching requires review.</td></tr>
+            </tbody>
+          </table></div>
+        </details>
+        <details className="helpDisclosure">
+          <summary>Conditions and IF</summary>
+          <div><ul>
+            <li><code>=design_span&gt;14</code> returns true or false.</li>
+            <li><code>=IF(A1&gt;10, "review", "ok")</code> chooses between two results.</li>
+            <li><code>=IF(material="premium", 6, 3)</code> compares text.</li>
+            <li><code>=IF(material&lt;&gt;"premium", "standard", "review")</code> tests inequality.</li>
+          </ul></div>
+        </details>
+        <details className="helpDisclosure">
+          <summary>VLOOKUP and XLOOKUP</summary>
+          <div>
+            <p>Lookup formulas work in normal cells; a lookup Smart Cell is not required.</p>
+            <ul>
+              <li><code>=VLOOKUP(A1,Data!A1:B200,2,FALSE)</code> performs an exact lookup.</li>
+              <li><code>=VLOOKUP(A1&amp;"|"&amp;B1,'Beam Data'!F2:G9999,2,FALSE)</code> supports helper keys.</li>
+              <li><code>=XLOOKUP(A1,Data!A1:A200,Data!B1:B200)</code> uses default exact matching.</li>
+              <li>Approximate and non-exact modes are preserved for review.</li>
+            </ul>
+          </div>
+        </details>
+        <details className="helpDisclosure">
+          <summary>Editing, errors, and imported formula review</summary>
+          <div><ul>
+            <li>The formula popup suggests Smart Cell names and populated coordinates.</li>
+            <li>Copy and Fill Down adjust coordinates while leaving Smart Cell names unchanged.</li>
+            <li>Renaming a Sheet updates direct cross-Sheet references.</li>
+            <li>Deleted references become <code>#REF!</code> and produce a visible engine error.</li>
+            <li>An invalid formula does not stop unrelated formulas from calculating.</li>
+            <li><code>IFERROR</code>, <code>IFNA</code>, <code>INDIRECT</code>, <code>OFFSET</code>, criteria aggregates, and date functions currently require review or an explicit rewrite.</li>
+          </ul></div>
+        </details>
+      </section>
+
+      <section className="helpCurrentState">
+        <div className="helpSectionHeading">
+          <p className="eyebrow">Storage &amp; Scope</p>
+          <h3>Saving and Current Limits</h3>
+        </div>
+        <div className="helpStatusGrid">
+          <article>
+            <h4>Available now</h4>
+            <ul>
+              <li>Browser-local configurations with New, Save, Duplicate, Delete, and rename.</li>
+              <li>Multiple Sheets, workbook import, Smart Cells, and Runner Preview.</li>
+              <li>Exact lookup formulas and embedded short dropdown lists.</li>
+            </ul>
+          </article>
+          <article>
+            <h4>Not available yet</h4>
+            <ul>
+              <li>Database persistence, accounts, or permissions.</li>
+              <li>Published versions, saved executions, or audit reports.</li>
+              <li>First-class reference tables and live CSV-backed options.</li>
+              <li>External action automation.</li>
+            </ul>
+          </article>
+        </div>
+        <details className="helpDisclosure">
+          <summary>Advanced prototype roles</summary>
+          <div><p>Lookup, action, validation, and compliance remain available for prototype work. The main workflow should use inputs, formulas, outputs, surfaced text, and Conditional Runner Sections until those roles are redesigned around reference data, automation, and formal run status.</p></div>
+        </details>
+      </section>
+
+      <section className="helpFooter">
+        <div>
+          <h3>Want to see the full workflow?</h3>
+          <p>Load the example, inspect its formulas and Smart Cells, then open Runner Preview.</p>
+        </div>
+        <button type="button" onClick={loadDemo}>Load Demo</button>
+      </section>
     </section>
   );
 }
@@ -3176,21 +3173,6 @@ function groupItemsByRunnerSection<T>(items: T[], cellForItem: (item: T) => Grid
   return groups;
 }
 
-function formatWorkbookWarnings(warnings: Array<{ cellId: string; message: string }>, runnerSheets: RunnerSheetContext[]): string {
-  const sheetByCellId = new Map<string, string>();
-
-  for (const sheet of runnerSheets) {
-    for (const cell of Object.values(sheet.cells)) {
-      sheetByCellId.set(`${sheet.sheetId}!${cell.address}`, sheet.sheetName);
-    }
-  }
-
-  return warnings.map((warning) => {
-    const sheetName = sheetByCellId.get(warning.cellId);
-    return sheetName ? `${sheetName}: ${warning.message}` : warning.message;
-  }).join(" ");
-}
-
 function buildDisplayValues(
   cells: Record<string, GridCell>,
   values: Record<string, CellValue>,
@@ -3429,10 +3411,4 @@ function prettifyName(name: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function formatOutputs(outputs: Record<string, CellValue>): string {
-  const entries = Object.entries(outputs);
-  if (entries.length === 0) return "No surfaced outputs";
-  return entries.map(([key, value]) => `${key}: ${formatCellValue(value)}`).join(" | ");
 }

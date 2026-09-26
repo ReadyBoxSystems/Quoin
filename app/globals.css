@@ -43,18 +43,102 @@ body {
 
 .topbar {
   align-items: center;
+  background: var(--sheet);
+  border: 1px solid var(--line-strong);
   display: flex;
-  gap: 18px;
-  justify-content: space-between;
-  margin-bottom: 14px;
+  gap: 20px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
 }
 
-.toolbar {
+.productMark {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   gap: 8px;
-  justify-content: flex-end;
+}
+
+.productMark .eyebrow {
+  margin: 0;
+}
+
+.productMark h1 {
+  font-size: 18px;
+  white-space: nowrap;
+}
+
+.menuBar {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.commandMenu {
+  position: relative;
+}
+
+.commandMenu summary {
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  list-style: none;
+  padding: 7px 9px;
+}
+
+.commandMenu summary::-webkit-details-marker {
+  display: none;
+}
+
+.commandMenu[open] > summary,
+.commandMenu summary:hover {
+  background: var(--header);
+}
+
+.commandMenu > div {
+  background: var(--sheet);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+  display: grid;
+  left: 0;
+  min-width: 210px;
+  padding: 5px;
+  position: absolute;
+  top: calc(100% + 3px);
+  z-index: 20;
+}
+
+.commandMenu button {
+  border: 0;
+  justify-content: flex-start;
+  min-height: 32px;
+  text-align: left;
+}
+
+.commandMenu .dangerCommand {
+  color: #9f1239;
+}
+
+.everydayToolbar {
+  align-items: center;
+  background: var(--sheet);
+  border: 1px solid var(--line-strong);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(440px, auto) auto auto minmax(190px, 1fr);
+  margin-bottom: 10px;
+  padding: 8px 10px;
+}
+
+.toolbarActions {
+  display: flex;
+  gap: 6px;
+}
+
+.fileInputHost {
+  height: 0;
+  overflow: hidden;
 }
 
 .configBar {
@@ -300,11 +384,11 @@ h1 {
 .viewTabs {
   display: inline-flex;
   gap: 4px;
-  margin-bottom: 10px;
+  margin: 0;
 }
 
 .viewTabs button {
-  min-width: 124px;
+  min-width: 82px;
 }
 
 .viewTabs button[data-active="true"] {
@@ -353,6 +437,14 @@ h1 {
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) minmax(330px, 380px);
+}
+
+.authoringLayout[data-inspector-open="false"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.inspectorReopen {
+  margin: 8px;
 }
 
 .sheetStrip {
@@ -750,6 +842,98 @@ h1 {
   padding: 12px;
   position: sticky;
   top: 16px;
+}
+
+.inspectorDisclosure,
+.nestedDisclosure {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.inspectorDisclosure > summary,
+.nestedDisclosure > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.inspectorDisclosure > summary::-webkit-details-marker,
+.nestedDisclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inspectorDisclosure > summary {
+  display: grid;
+  gap: 2px;
+  padding: 11px 12px;
+}
+
+.inspectorDisclosure > summary::after,
+.nestedDisclosure > summary::after {
+  color: var(--muted);
+  content: "+";
+  font-size: 16px;
+  justify-self: end;
+  line-height: 1;
+  margin-top: -18px;
+}
+
+.inspectorDisclosure[open] > summary::after,
+.nestedDisclosure[open] > summary::after {
+  content: "−";
+}
+
+.inspectorDisclosure > summary span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.inspectorDisclosure > summary small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inspectorDisclosureBody,
+.nestedDisclosureBody {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.nestedDisclosure {
+  background: #ffffff;
+}
+
+.nestedDisclosure > summary {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px;
+}
+
+.nestedDisclosure > summary::after {
+  margin-top: -15px;
+}
+
+.inspectorDisclosure .dependencyPanel {
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 1100px) {
+  .everydayToolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .status {
+    max-width: none;
+  }
+
+  .authoringLayout {
+    grid-template-columns: minmax(0, 1fr) minmax(290px, 330px);
+  }
 }
 
 .inspectorHeader {
@@ -1461,12 +1645,278 @@ h1 {
   padding: 1px 4px;
 }
 
+.helpStart {
+  background: linear-gradient(135deg, #f8fbff 0%, #eef7ff 100%);
+  border: 1px solid #b8d9ff;
+  border-radius: 6px;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  padding: 18px;
+}
+
+.helpStart h3,
+.helpSectionHeading h3,
+.helpFooter h3 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.helpWorkflow {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.helpWorkflow li {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.helpWorkflow strong {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.helpWorkflow span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.helpConceptExample {
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.helpConceptExample > strong {
+  font-size: 14px;
+}
+
+.helpConceptExample dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.helpConceptExample dl div {
+  display: grid;
+  gap: 2px;
+}
+
+.helpConceptExample dt {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.helpConceptExample dd {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.helpTaskGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.helpTaskGrid > article,
+.helpStatusGrid > article {
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+}
+
+.helpTaskGrid h3,
+.helpStatusGrid h4 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.helpTaskGrid p,
+.helpTaskGrid li,
+.helpStatusGrid li,
+.helpSectionHeading p:not(.eyebrow),
+.helpDisclosure p,
+.helpDisclosure li,
+.helpFooter p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.helpTaskGrid ul,
+.helpTaskGrid ol,
+.helpStatusGrid ul,
+.helpDisclosure ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.helpTaskGrid details {
+  border-top: 1px solid var(--line);
+  margin-top: 3px;
+  padding-top: 9px;
+}
+
+.helpTaskGrid summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.helpTaskGrid details ul {
+  margin-top: 9px;
+}
+
+.helpStep {
+  color: var(--accent) !important;
+  font-size: 11px !important;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.helpReference,
+.helpCurrentState {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.helpSectionHeading {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.helpDisclosure {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.helpDisclosure > summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  list-style: none;
+  padding: 11px 12px;
+}
+
+.helpDisclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.helpDisclosure > summary::after {
+  color: var(--muted);
+  content: "+";
+  float: right;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.helpDisclosure[open] > summary::after {
+  content: "−";
+}
+
+.helpDisclosure > div {
+  border-top: 1px solid var(--line);
+  padding: 12px;
+}
+
+.helpDisclosure p {
+  margin: 0 0 8px;
+}
+
+.helpTableScroll {
+  overflow-x: auto;
+  padding: 0 !important;
+}
+
+.helpFunctionTable {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 680px;
+  width: 100%;
+}
+
+.helpFunctionTable th,
+.helpFunctionTable td {
+  border-bottom: 1px solid var(--line);
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.helpFunctionTable th {
+  background: var(--header);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.helpFunctionTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.helpStatusGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.helpStatusGrid article:first-child {
+  background: #f3fbf8;
+  border-color: #b7ead3;
+}
+
+.helpStatusGrid article:last-child {
+  background: #fafbfc;
+}
+
+.helpFooter {
+  align-items: center;
+  background: var(--header);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 16px;
+}
+
+.helpFooter div {
+  display: grid;
+  gap: 5px;
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 14px;
   }
 
   .topbar,
+  .everydayToolbar,
   .authoringLayout,
   .helpGrid,
   .importControls,
@@ -1480,6 +1930,29 @@ h1 {
   .configBar {
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .topbar {
+    align-items: start;
+  }
+
+  .menuBar {
+    flex-wrap: wrap;
+  }
+
+  .everydayToolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .helpStart,
+  .helpTaskGrid,
+  .helpStatusGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .helpFooter {
+    align-items: stretch;
+    display: grid;
   }
 
   .importReviewList p {

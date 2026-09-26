@@ -115,6 +115,7 @@ export function executeEngine(input: EngineInput): EngineResult {
   const warnings: EngineIssue[] = [];
   const ruleStates: RuleState[] = [];
   const dependencies = new Map<string, Set<string>>();
+  const blockedCellIds = new Set<string>();
 
   for (const cell of cells) {
     const refs = referencesForCell(cell);
@@ -125,6 +126,7 @@ export function executeEngine(input: EngineInput): EngineResult {
       if (!dependency) {
         if (isCellReference(ref) || isScopedCellReference(ref)) continue;
         errors.push(issue(cell, `Missing reference "${ref}".`));
+        blockedCellIds.add(cell.id);
         continue;
       }
       deps.add(dependency.id);
@@ -136,18 +138,19 @@ export function executeEngine(input: EngineInput): EngineResult {
   const sort = topologicalSort(cells, dependencies);
   for (const cycleId of sort.cycleIds) {
     const cell = indexes.byId.get(cycleId);
-    if (cell) errors.push(issue(cell, "Cell participates in a circular dependency."));
-  }
-
-  if (errors.length > 0) {
-    return emptyResult(false, cells, sort.order, errors, warnings, ruleStates);
+    if (cell) {
+      errors.push(issue(cell, "Cell participates in a circular dependency."));
+      blockedCellIds.add(cell.id);
+    }
   }
 
   const valuesById = new Map<string, CellValue>();
   const scope: Record<string, CellValue> = {};
 
   for (const cell of sort.order.map((id) => indexes.byId.get(id)).filter(Boolean) as EngineCell[]) {
-    const value = evaluateCell(cell, valuesById, scope, input.inputs ?? {}, indexes, errors);
+    const value = blockedCellIds.has(cell.id)
+      ? null
+      : evaluateCell(cell, valuesById, scope, input.inputs ?? {}, indexes, errors);
     valuesById.set(cell.id, value);
     scope[cell.address] = value;
     if (cell.name) scope[cell.name] = value;
@@ -518,6 +521,11 @@ function evaluateExpression(
   cell: EngineCell,
   errors: EngineIssue[],
 ): CellValue {
+  if (/#REF!/i.test(expression)) {
+    errors.push(issue(cell, "Formula error: Broken reference. Restore the deleted row or column, or update the formula."));
+    return null;
+  }
+
   try {
     const expressionWithLookupValues = replaceLookupCallsWithValues(expression, scope, cell, errors);
     const node = parseExpression(expressionWithLookupValues);
@@ -1055,25 +1063,6 @@ function valuesRecord(cells: EngineCell[], valuesById: Map<string, CellValue>): 
     if (cell.name) values[cell.name] = valuesById.get(cell.id) ?? null;
   }
   return values;
-}
-
-function emptyResult(
-  valid: boolean,
-  cells: EngineCell[],
-  executionOrder: string[],
-  errors: EngineIssue[],
-  warnings: EngineIssue[],
-  ruleStates: RuleState[],
-): EngineResult {
-  return {
-    valid,
-    values: {},
-    outputs: Object.fromEntries(cells.filter((cell) => cell.surfaced).map((cell) => [cell.name ?? cell.address, null])),
-    executionOrder,
-    errors,
-    warnings,
-    ruleStates,
-  };
 }
 
 function duplicateWorkbookNames(sheets: WorkbookEngineSheet[]): string[] {
