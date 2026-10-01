@@ -46,14 +46,8 @@ export interface LocalConfiguration {
   name: string;
   activeSheetId?: string;
   sheets?: WorkbookSheet[];
-  cells: Record<string, GridCell>;
+  cells?: Record<string, GridCell>;
   columnCount?: number;
   rowCount?: number;
   updatedAt: string;
-}
-
-export interface SheetSnapshot {
-  cells: Record<string, GridCell>;
-  columnCount: number;
-  rowCount: number;
 }

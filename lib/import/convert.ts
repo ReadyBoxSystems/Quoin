@@ -1,4 +1,5 @@
 import type { SmartCellType } from "@/lib/engine";
+import { parseFormula } from "@/lib/formula/model";
 import type { GridCell } from "@/lib/sheet/types";
 import type { ImportedCell, ImportedCellValue, ImportedDataValidation, ImportedName, ImportedSheet, ImportReviewItem } from "./types";
 
@@ -282,15 +283,7 @@ function reviewImportedFormula(
 }
 
 function functionNamesInFormula(formula: string): string[] {
-  const names = new Set<string>();
-  const pattern = /\b([A-Za-z_][A-Za-z0-9_.]*)\s*\(/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(formula))) {
-    names.add(match[1].toUpperCase());
-  }
-
-  return [...names];
+  return parseFormula(formula).functions;
 }
 
 function unsupportedFunctionGuidance(functionName: string): {

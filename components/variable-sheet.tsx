@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentProps, type ReactNode } from "react";
+import { CommandMenu } from "@/components/command-menu";
+import { SheetStrip } from "@/components/sheet-strip";
 import {
   executeEngine,
   executeWorkbookEngine,
@@ -11,11 +13,25 @@ import {
   type WorkbookEngineResult,
 } from "@/lib/engine";
 import { convertImportedSheetToQuoin } from "@/lib/import/convert";
+import { parseFormula, quoteSheetName as quoteFormulaSheetName, rewriteFormula } from "@/lib/formula/model";
 import type { ImportedName, ImportedWorkbook, ImportReviewItem } from "@/lib/import/types";
-import type { GridCell, InputControl, LocalConfiguration, LookupConfig, SheetSnapshot, SmartCellVisibilityCondition, WorkbookSheet } from "@/lib/sheet/types";
+import type { GridCell, InputControl, LocalConfiguration, LookupConfig, SmartCellVisibilityCondition, WorkbookSheet } from "@/lib/sheet/types";
+import {
+  addWorkbookSheet,
+  applyWorkbookTransaction,
+  createWorkbookState,
+  diffWorkbook,
+  getActiveSheet,
+  replaceWorkbook,
+  switchActiveSheet,
+  updateActiveSheet,
+  type WorkbookState,
+  type WorkbookTransaction,
+} from "@/lib/workbook/state";
 
 const STORAGE_KEY = "quoin.gridSheet.v2";
-const CONFIG_STORAGE_KEY = "quoin.configurations.v1";
+const LEGACY_CONFIG_STORAGE_KEY = "quoin.configurations.v1";
+const CONFIG_STORAGE_KEY = "quoin.configurations.v2";
 const ACTIVE_CONFIG_KEY = "quoin.activeConfiguration.v1";
 const defaultColumnCount = 16;
 const defaultRowCount = 30;
@@ -216,11 +232,9 @@ const initialCells: Record<string, GridCell> = {
 };
 
 export function VariableSheet() {
-  const [sheets, setSheets] = useState<WorkbookSheet[]>(() => [makeWorkbookSheet("Sheet 1", initialCells, defaultColumnCount, defaultRowCount)]);
-  const [activeSheetId, setActiveSheetId] = useState("");
-  const [cells, setCells] = useState<Record<string, GridCell>>(initialCells);
-  const [columnCount, setColumnCount] = useState(defaultColumnCount);
-  const [rowCount, setRowCount] = useState(defaultRowCount);
+  const [workbook, setWorkbook] = useState<WorkbookState>(() => createWorkbookState([
+    makeWorkbookSheet("Sheet 1", initialCells, defaultColumnCount, defaultRowCount),
+  ]));
   const [configurations, setConfigurations] = useState<LocalConfiguration[]>([]);
   const [activeConfigId, setActiveConfigId] = useState("");
   const [configName, setConfigName] = useState("Demo - Beam Selection");
@@ -232,38 +246,34 @@ export function VariableSheet() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [activeView, setActiveView] = useState<"sheet" | "runner" | "help">("sheet");
   const [activeReferenceIndex, setActiveReferenceIndex] = useState(0);
-  const [undoStack, setUndoStack] = useState<SheetSnapshot[]>([]);
-  const [redoStack, setRedoStack] = useState<SheetSnapshot[]>([]);
+  const [undoStack, setUndoStack] = useState<WorkbookTransaction[]>([]);
+  const [redoStack, setRedoStack] = useState<WorkbookTransaction[]>([]);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [pendingImport, setPendingImport] = useState<ImportedWorkbook | null>(null);
   const [selectedImportSheetId, setSelectedImportSheetId] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [importMessage, setImportMessage] = useState("");
   const [importError, setImportError] = useState("");
-  const [dropdownOptionsDraft, setDropdownOptionsDraft] = useState("");
   const [runnerOverrides, setRunnerOverrides] = useState<RunnerOverrides>({});
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [gridWindowStart, setGridWindowStart] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const configSelectRef = useRef<HTMLSelectElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const cellRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const activeSheet = useMemo(() => sheets.find((sheet) => sheet.id === activeSheetId) ?? sheets[0] ?? null, [activeSheetId, sheets]);
+  const sheets = workbook.sheets;
+  const activeSheetId = workbook.activeSheetId;
+  const activeSheet = useMemo(() => getActiveSheet(workbook), [workbook]);
+  const cells = activeSheet?.cells ?? {};
+  const columnCount = activeSheet?.columnCount ?? defaultColumnCount;
+  const rowCount = activeSheet?.rowCount ?? defaultRowCount;
   const columns = useMemo(() => makeColumns(columnCount), [columnCount]);
   const selectedCell = getCell(cells, selectedAddress);
-  const selectedDropdownOptionsText = selectedCell.inputOptions.join("\n");
   const engineCells = useMemo(() => toEngineCells(cells), [cells]);
-  const visibleSheets = useMemo(
-    () => sheets.length > 0
-      ? sheets.map((sheet) => (
-        sheet.id === activeSheetId
-          ? { ...sheet, cells, columnCount, rowCount }
-          : sheet
-      ))
-      : [],
-    [activeSheetId, cells, columnCount, rowCount, sheets],
-  );
+  const visibleSheets = sheets;
   const workbookEngineSheets = useMemo(
     () => visibleSheets.map((sheet) => ({
       id: sheet.id,
@@ -285,7 +295,11 @@ export function VariableSheet() {
     })),
     [runnerVisibleSheets],
   );
-  const runnerWorkbookResult = useMemo(() => executeWorkbookEngine({ sheets: runnerWorkbookEngineSheets }), [runnerWorkbookEngineSheets]);
+  const hasRunnerOverrides = Object.keys(runnerOverrides).length > 0;
+  const runnerWorkbookResult = useMemo(
+    () => hasRunnerOverrides ? executeWorkbookEngine({ sheets: runnerWorkbookEngineSheets }) : workbookResult,
+    [hasRunnerOverrides, runnerWorkbookEngineSheets, workbookResult],
+  );
   const result = useMemo(
     () => workbookResult.sheetResults.find((item) => item.sheetId === activeSheet?.id)?.result ?? executeEngine({ cells: engineCells }),
     [activeSheet?.id, engineCells, workbookResult],
@@ -339,12 +353,9 @@ export function VariableSheet() {
     [cells, selectedAddress],
   );
   useEffect(() => {
-    setDropdownOptionsDraft(selectedDropdownOptionsText);
-  }, [selectedAddress]);
-
-  useEffect(() => {
     try {
-      const storedConfigs = window.localStorage.getItem(CONFIG_STORAGE_KEY);
+      const storedConfigs = window.localStorage.getItem(CONFIG_STORAGE_KEY)
+        ?? window.localStorage.getItem(LEGACY_CONFIG_STORAGE_KEY);
       const activeId = window.localStorage.getItem(ACTIVE_CONFIG_KEY) ?? "";
       const parsedConfigs = storedConfigs ? hydrateConfigurations(JSON.parse(storedConfigs) as LocalConfiguration[]) : [];
       const migratedCells = migrateLegacyCells();
@@ -356,11 +367,8 @@ export function VariableSheet() {
       setConfigurations(nextConfigurations);
       setActiveConfigId(activeConfig.id);
       setConfigName(activeConfig.name);
-      setSheets(activeConfig.sheets ?? [sheetFromConfiguration(activeConfig)]);
-      setActiveSheetId(activeConfig.activeSheetId ?? activeConfig.sheets?.[0]?.id ?? "");
-      setCells(activeConfig.cells);
-      setColumnCount(Math.max(activeConfig.columnCount ?? defaultColumnCount, defaultColumnCount));
-      setRowCount(Math.max(activeConfig.rowCount ?? defaultRowCount, defaultRowCount));
+      const loadedSheets = activeConfig.sheets ?? [sheetFromConfiguration(activeConfig)];
+      setWorkbook(replaceWorkbook(loadedSheets, activeConfig.activeSheetId));
       setUndoStack([]);
       setRedoStack([]);
       setIsDirty(false);
@@ -407,6 +415,16 @@ export function VariableSheet() {
   }, [visibleReferenceOptions.length]);
 
   useEffect(() => {
+    if (rowCount <= 200) return;
+    const selected = parseAddress(selectedAddress);
+    if (!selected) return;
+    setGridWindowStart((current) => {
+      if (selected.row > current && selected.row <= current + 100) return current;
+      return Math.max(0, Math.min(rowCount - 100, selected.row - 20));
+    });
+  }, [rowCount, selectedAddress]);
+
+  useEffect(() => {
     function handleUndoRedo(event: KeyboardEvent) {
       if (event.defaultPrevented) return;
       if (!(event.ctrlKey || event.metaKey)) return;
@@ -428,39 +446,55 @@ export function VariableSheet() {
     return () => window.removeEventListener("keydown", handleUndoRedo);
   });
 
-  function applyCellsChange(updater: (current: Record<string, GridCell>) => Record<string, GridCell>) {
-    setCells((current) => {
-      const next = updater(current);
-      if (cellsEqual(current, next)) return current;
-
-      setUndoStack((history) => [...history.slice(Math.max(0, history.length - historyLimit + 1)), makeSnapshot(current, columnCount, rowCount)]);
+  function commitWorkbookChange(label: string, transition: (current: WorkbookState) => WorkbookState) {
+    setWorkbook((current) => {
+      const next = transition(current);
+      const transaction = diffWorkbook(current, next, label);
+      if (!transaction) return current;
+      setUndoStack((history) => [...history.slice(Math.max(0, history.length - historyLimit + 1)), transaction]);
       setRedoStack([]);
+      setIsDirty(true);
       return next;
     });
-    setIsDirty(true);
   }
 
-  function applySheetResize(updater: (current: Record<string, GridCell>) => Record<string, GridCell>, nextColumnCount: number, nextRowCount: number) {
-    setUndoStack((history) => [...history.slice(Math.max(0, history.length - historyLimit + 1)), makeSnapshot(cells, columnCount, rowCount)]);
-    setRedoStack([]);
-    setCells((current) => updater(current));
-    setColumnCount(nextColumnCount);
-    setRowCount(nextRowCount);
-    setIsDirty(true);
+  function applyCellsChange(updater: (current: Record<string, GridCell>) => Record<string, GridCell>, label = "Edit cells") {
+    commitWorkbookChange(label, (current) => updateActiveSheet(current, (sheet) => {
+      const next = updater(sheet.cells);
+      return cellsEqual(sheet.cells, next) ? sheet : { ...sheet, cells: next };
+    }));
+  }
+
+  function applySheetResize(updater: (current: Record<string, GridCell>) => Record<string, GridCell>, nextColumnCount: number, nextRowCount: number, label: string) {
+    commitWorkbookChange(label, (current) => updateActiveSheet(current, (sheet) => ({
+      ...sheet,
+      cells: updater(sheet.cells),
+      columnCount: nextColumnCount,
+      rowCount: nextRowCount,
+    })));
   }
 
   function updateCell(address: string, patch: Partial<GridCell>) {
     const existing = getCell(cells, address);
     const oldName = existing.name;
     const nextName = patch.name;
-    applyCellsChange((current) => {
-      const existing = getCell(current, address);
-      return { ...current, [address]: applyCellPatch(existing, patch) };
+    commitWorkbookChange(`Edit ${address}`, (current) => {
+      let next = updateActiveSheet(current, (sheet) => {
+        const currentCell = getCell(sheet.cells, address);
+        const nextCells = { ...sheet.cells, [address]: applyCellPatch(currentCell, patch) };
+        return cellsEqual(sheet.cells, nextCells) ? sheet : { ...sheet, cells: nextCells };
+      });
+      if (nextName !== undefined && oldName && nextName && oldName !== nextName) {
+        next = {
+          ...next,
+          sheets: next.sheets.map((sheet) => ({
+            ...sheet,
+            cells: renameVisibilityConditionReferences(sheet.cells, oldName, nextName),
+          })),
+        };
+      }
+      return next;
     });
-
-    if (nextName !== undefined && oldName && nextName && oldName !== nextName) {
-      renameVisibilityConditionSource(oldName, nextName);
-    }
   }
 
   function updateRunnerCell(sheetId: string, address: string, entry: string) {
@@ -468,12 +502,6 @@ export function VariableSheet() {
       ...current,
       [runnerOverrideKey(sheetId, address)]: entry,
     }));
-  }
-
-  function renameVisibilityConditionSource(oldName: string, newName: string) {
-    const renameCells = (source: Record<string, GridCell>) => renameVisibilityConditionReferences(source, oldName, newName);
-    setCells((current) => renameCells(current));
-    setSheets((current) => current.map((sheet) => ({ ...sheet, cells: renameCells(sheet.cells) })));
   }
 
   function clearCell(address: string) {
@@ -523,11 +551,8 @@ export function VariableSheet() {
     setUndoStack((history) => {
       const previous = history[history.length - 1];
       if (!previous) return history;
-
-      setRedoStack((redoHistory) => [...redoHistory.slice(Math.max(0, redoHistory.length - historyLimit + 1)), makeSnapshot(cells, columnCount, rowCount)]);
-      setCells(cloneCells(previous.cells));
-      setColumnCount(previous.columnCount);
-      setRowCount(previous.rowCount);
+      setRedoStack((redoHistory) => [...redoHistory.slice(Math.max(0, redoHistory.length - historyLimit + 1)), previous]);
+      setWorkbook((current) => applyWorkbookTransaction(current, previous, "undo"));
       setEditingAddress(null);
       setDraftEntry("");
       setIsDirty(true);
@@ -541,10 +566,8 @@ export function VariableSheet() {
       const next = history[history.length - 1];
       if (!next) return history;
 
-      setUndoStack((undoHistory) => [...undoHistory.slice(Math.max(0, undoHistory.length - historyLimit + 1)), makeSnapshot(cells, columnCount, rowCount)]);
-      setCells(cloneCells(next.cells));
-      setColumnCount(next.columnCount);
-      setRowCount(next.rowCount);
+      setUndoStack((undoHistory) => [...undoHistory.slice(Math.max(0, undoHistory.length - historyLimit + 1)), next]);
+      setWorkbook((current) => applyWorkbookTransaction(current, next, "redo"));
       setEditingAddress(null);
       setDraftEntry("");
       setIsDirty(true);
@@ -756,15 +779,20 @@ export function VariableSheet() {
   }
 
   function resetSheet() {
-    applyCellsChange(() => initialCells);
-    setColumnCount(defaultColumnCount);
-    setRowCount(defaultRowCount);
+    if (!confirmDiscardUnsaved()) return;
+    commitWorkbookChange("Load demo", (current) => updateActiveSheet(current, (sheet) => ({
+      ...sheet,
+      cells: initialCells,
+      columnCount: defaultColumnCount,
+      rowCount: defaultRowCount,
+    })));
     setSelectedAddress("B2");
     setEditingAddress(null);
     setRunnerOverrides({});
   }
 
   function clearSheet() {
+    if (!confirmDiscardUnsaved()) return;
     applyCellsChange(() => ({}));
     setSelectedAddress("A1");
     setEditingAddress(null);
@@ -773,12 +801,7 @@ export function VariableSheet() {
   }
 
   function currentWorkbookSheets(): WorkbookSheet[] {
-    if (sheets.length === 0) return [makeWorkbookSheet("Sheet 1", cells, columnCount, rowCount)];
-    return sheets.map((sheet) => (
-      sheet.id === activeSheetId
-        ? { ...sheet, cells: hydrateCells(cells), columnCount, rowCount }
-        : sheet
-    ));
+    return sheets.length === 0 ? [makeWorkbookSheet("Sheet 1", {}, defaultColumnCount, defaultRowCount)] : sheets;
   }
 
   function saveConfiguration() {
@@ -801,14 +824,12 @@ export function VariableSheet() {
 
       return current.map((configuration) => {
         if (configuration.id !== activeConfigId) return configuration;
+        const { cells: _legacyCells, columnCount: _legacyColumns, rowCount: _legacyRows, ...currentConfiguration } = configuration;
         return {
-          ...configuration,
+          ...currentConfiguration,
           name,
           activeSheetId: nextActiveSheet.id,
           sheets: nextSheets,
-          cells: nextActiveSheet.cells,
-          columnCount: nextActiveSheet.columnCount,
-          rowCount: nextActiveSheet.rowCount,
           updatedAt,
         };
       });
@@ -822,7 +843,7 @@ export function VariableSheet() {
   function addRowBelow() {
     const selected = parseAddress(selectedAddress);
     const insertAt = selected ? selected.row + 1 : rowCount + 1;
-    applySheetResize((current) => insertRow(current, insertAt), columnCount, Math.max(rowCount + 1, insertAt));
+    applySheetResize((current) => insertRow(current, insertAt), columnCount, Math.max(rowCount + 1, insertAt), `Insert row ${insertAt}`);
     setSelectedAddress(`${selected?.column ?? "A"}${insertAt}`);
     setEditingAddress(null);
   }
@@ -830,7 +851,7 @@ export function VariableSheet() {
   function deleteSelectedRow() {
     const selected = parseAddress(selectedAddress);
     if (!selected || rowCount <= 1) return;
-    applySheetResize((current) => deleteRow(current, selected.row), columnCount, Math.max(1, rowCount - 1));
+    applySheetResize((current) => deleteRow(current, selected.row), columnCount, Math.max(1, rowCount - 1), `Delete row ${selected.row}`);
     setSelectedAddress(`${selected.column}${Math.min(selected.row, rowCount - 1)}`);
     setEditingAddress(null);
   }
@@ -839,7 +860,7 @@ export function VariableSheet() {
     const selected = parseAddress(selectedAddress);
     const selectedColumnNumber = selected ? columnNumber(selected.column) : columnCount;
     const insertAt = selectedColumnNumber + 1;
-    applySheetResize((current) => insertColumn(current, insertAt), Math.max(columnCount + 1, insertAt), rowCount);
+    applySheetResize((current) => insertColumn(current, insertAt), Math.max(columnCount + 1, insertAt), rowCount, `Insert column ${columnName(insertAt) ?? insertAt}`);
     setSelectedAddress(`${columnName(insertAt) ?? "A"}${selected?.row ?? 1}`);
     setEditingAddress(null);
   }
@@ -848,7 +869,7 @@ export function VariableSheet() {
     const selected = parseAddress(selectedAddress);
     if (!selected || columnCount <= 1) return;
     const deleteAt = columnNumber(selected.column);
-    applySheetResize((current) => deleteColumn(current, deleteAt), Math.max(1, columnCount - 1), rowCount);
+    applySheetResize((current) => deleteColumn(current, deleteAt), Math.max(1, columnCount - 1), rowCount, `Delete column ${selected.column}`);
     setSelectedAddress(`${columnName(Math.min(deleteAt, columnCount - 1)) ?? "A"}${selected.row}`);
     setEditingAddress(null);
   }
@@ -881,14 +902,14 @@ export function VariableSheet() {
     const activeConfig = configurations.find((configuration) => configuration.id === activeConfigId);
     const label = activeConfig?.name ?? "this configuration";
 
+    if (!window.confirm(`Delete "${label}"? This only removes the local browser copy.`)) return;
+
     if (configurations.length <= 1) {
       const created = makeConfiguration("Untitled Configuration", {}, defaultColumnCount, defaultRowCount);
       setConfigurations([created]);
       loadConfiguration(created);
       return;
     }
-
-    if (!window.confirm(`Delete "${label}"? This only removes the local browser copy.`)) return;
 
     const remaining = configurations.filter((configuration) => configuration.id !== activeConfigId);
     setConfigurations(remaining);
@@ -906,11 +927,7 @@ export function VariableSheet() {
     const nextActiveSheet = nextSheets.find((sheet) => sheet.id === configuration.activeSheetId) ?? nextSheets[0];
     setActiveConfigId(configuration.id);
     setConfigName(configuration.name);
-    setSheets(nextSheets);
-    setActiveSheetId(nextActiveSheet.id);
-    setCells(nextActiveSheet.cells);
-    setColumnCount(nextActiveSheet.columnCount);
-    setRowCount(nextActiveSheet.rowCount);
+    setWorkbook(replaceWorkbook(nextSheets, nextActiveSheet.id));
     setUndoStack([]);
     setRedoStack([]);
     setSelectedAddress("A1");
@@ -922,38 +939,20 @@ export function VariableSheet() {
 
   function switchSheet(nextSheetId: string) {
     if (nextSheetId === activeSheetId) return;
-    const nextSheets = currentWorkbookSheets();
-    const nextSheet = nextSheets.find((sheet) => sheet.id === nextSheetId);
-    if (!nextSheet) return;
-
-    setSheets(nextSheets);
-    setActiveSheetId(nextSheet.id);
-    setCells(nextSheet.cells);
-    setColumnCount(nextSheet.columnCount);
-    setRowCount(nextSheet.rowCount);
-    setUndoStack([]);
-    setRedoStack([]);
+    if (!sheets.some((sheet) => sheet.id === nextSheetId)) return;
+    setWorkbook((current) => switchActiveSheet(current, nextSheetId));
     setSelectedAddress("A1");
     setEditingAddress(null);
     setDraftEntry("");
     setCopiedAddress(null);
-    setIsDirty(true);
   }
 
   function addSheet() {
-    const nextSheets = currentWorkbookSheets();
-    const created = makeWorkbookSheet(`Sheet ${nextSheets.length + 1}`, {}, defaultColumnCount, defaultRowCount);
-    setSheets([...nextSheets, created]);
-    setActiveSheetId(created.id);
-    setCells(created.cells);
-    setColumnCount(created.columnCount);
-    setRowCount(created.rowCount);
-    setUndoStack([]);
-    setRedoStack([]);
+    const created = makeWorkbookSheet(`Sheet ${sheets.length + 1}`, {}, defaultColumnCount, defaultRowCount);
+    commitWorkbookChange("Add Sheet", (current) => addWorkbookSheet(current, created));
     setSelectedAddress("A1");
     setEditingAddress(null);
     setDraftEntry("");
-    setIsDirty(true);
   }
 
   function renameSheet(sheetId: string, name: string) {
@@ -969,13 +968,7 @@ export function VariableSheet() {
       cells: renameSheetReferences(sheet.cells, renamedSheet.name, finalName),
     }));
     const nextActiveSheet = nextSheets.find((sheet) => sheet.id === activeSheetId) ?? nextSheets[0];
-    setSheets(nextSheets);
-    if (nextActiveSheet) {
-      setCells(nextActiveSheet.cells);
-      setColumnCount(nextActiveSheet.columnCount);
-      setRowCount(nextActiveSheet.rowCount);
-    }
-    setIsDirty(true);
+    if (nextActiveSheet) commitWorkbookChange("Rename Sheet", () => replaceWorkbook(nextSheets, nextActiveSheet.id));
   }
 
   function confirmDiscardUnsaved() {
@@ -1077,8 +1070,19 @@ export function VariableSheet() {
     setImportError("");
   }
 
+  function openWorkbookIssue() {
+    if (!firstStatusIssue) return;
+    if (firstStatusIssue.sheetId) {
+      setWorkbook((current) => switchActiveSheet(current, firstStatusIssue.sheetId!));
+    }
+    setSelectedAddress(firstStatusIssue.address);
+    setEditingAddress(null);
+    setActiveView("sheet");
+  }
+
   const selectedIssues = issueMap.get(selectedAddress) ?? [];
-  const firstStatusIssue = result.errors[0] ?? result.warnings[0] ?? null;
+  const firstStatusIssue = workbookResult.errors[0] ?? workbookResult.warnings[0] ?? null;
+  const activeSheetHasIssues = result.errors.length > 0;
   const selectedImportSheet = pendingImport?.sheets.find((sheet) => sheet.id === selectedImportSheetId) ?? pendingImport?.sheets[0] ?? null;
   const importReviewItems = pendingImport && selectedImportSheet
     ? pendingImport.reviewItems.concat(importReviewItemsForSheet(pendingImport.names, selectedImportSheet.name))
@@ -1092,9 +1096,9 @@ export function VariableSheet() {
           <h1>Variable Sheet</h1>
         </div>
         <nav className="menuBar" aria-label="Application commands">
-          <CommandMenu label="File">
+          <CommandMenu label="File" open={openMenu === "File"} onOpenChange={(open) => setOpenMenu((current) => open ? "File" : current === "File" ? null : current)}>
             <button type="button" onClick={createConfiguration}>New configuration</button>
-            <button type="button" onClick={() => configSelectRef.current?.focus()}>Open local configuration</button>
+            <button type="button" onClick={() => configSelectRef.current?.focus()}>Choose local configuration</button>
             <button type="button" onClick={saveConfiguration}>Save</button>
             <button type="button" onClick={duplicateConfiguration}>Duplicate</button>
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
@@ -1104,12 +1108,12 @@ export function VariableSheet() {
           </CommandMenu>
           {activeView === "sheet" && (
             <>
-              <CommandMenu label="Edit">
+              <CommandMenu label="Edit" open={openMenu === "Edit"} onOpenChange={(open) => setOpenMenu((current) => open ? "Edit" : current === "Edit" ? null : current)}>
                 <button type="button" onClick={() => copyCell(selectedAddress)}>Copy Cell</button>
                 <button type="button" onClick={() => pasteCopiedCell(selectedAddress)} disabled={!copiedAddress}>Paste Cell</button>
                 <button type="button" onClick={() => fillDown(selectedAddress)}>Fill Down</button>
               </CommandMenu>
-              <CommandMenu label="Sheet">
+              <CommandMenu label="Sheet" open={openMenu === "Sheet"} onOpenChange={(open) => setOpenMenu((current) => open ? "Sheet" : current === "Sheet" ? null : current)}>
                 <button type="button" onClick={addRowBelow}>Add Row</button>
                 <button type="button" onClick={deleteSelectedRow}>Delete Row</button>
                 <button type="button" onClick={addColumnRight}>Add Column</button>
@@ -1118,7 +1122,7 @@ export function VariableSheet() {
               </CommandMenu>
             </>
           )}
-          <CommandMenu label="View">
+          <CommandMenu label="View" open={openMenu === "View"} onOpenChange={(open) => setOpenMenu((current) => open ? "View" : current === "View" ? null : current)}>
             <button type="button" onClick={() => setActiveView("sheet")}>Sheet</button>
             <button type="button" onClick={() => setActiveView("runner")}>Runner Preview</button>
             {activeView === "sheet" && (
@@ -1127,7 +1131,7 @@ export function VariableSheet() {
               </button>
             )}
           </CommandMenu>
-          <CommandMenu label="Help">
+          <CommandMenu label="Help" open={openMenu === "Help"} onOpenChange={(open) => setOpenMenu((current) => open ? "Help" : current === "Help" ? null : current)}>
             <button type="button" onClick={() => setActiveView("help")}>Quick start and Help</button>
             <button type="button" onClick={resetSheet}>Load Demo</button>
           </CommandMenu>
@@ -1165,10 +1169,13 @@ export function VariableSheet() {
           <button type="button" data-active={activeView === "sheet"} onClick={() => setActiveView("sheet")}>Sheet</button>
           <button type="button" data-active={activeView === "runner"} onClick={() => setActiveView("runner")}>Runner</button>
         </div>
-        <div className="status" data-valid={result.valid}>
-          <strong>{result.valid ? "Engine Ready" : "Engine Error"}</strong>
-          {!result.valid && firstStatusIssue && (
-            <span>{firstStatusIssue.address}: {firstStatusIssue.message}</span>
+        <div className="status" data-valid={workbookResult.valid}>
+          <strong>{workbookResult.valid ? "Workbook Ready" : "Workbook Error"}</strong>
+          {!workbookResult.valid && firstStatusIssue && (
+            <button type="button" className="statusIssue" onClick={openWorkbookIssue}>
+              {activeSheetHasIssues ? "Active Sheet" : firstStatusIssue.sheetName ?? "Workbook"}
+              {` · ${firstStatusIssue.address}: ${firstStatusIssue.message}`}
+            </button>
           )}
         </div>
       </div>
@@ -1288,7 +1295,15 @@ export function VariableSheet() {
           />
 
           <div className="authoringLayout" data-inspector-open={isInspectorOpen}>
-            <section className="spreadsheetFrame" aria-label="Quoin spreadsheet grid">
+            <section
+              className="spreadsheetFrame"
+              aria-label="Quoin spreadsheet grid"
+              onScroll={(event) => {
+                if (rowCount <= 200) return;
+                const next = Math.max(0, Math.min(rowCount - 100, Math.floor(event.currentTarget.scrollTop / 26) - 20));
+                setGridWindowStart(next);
+              }}
+            >
               {!isInspectorOpen && (
                 <button className="inspectorReopen" type="button" onClick={() => setIsInspectorOpen(true)}>
                   Show Inspector
@@ -1306,8 +1321,13 @@ export function VariableSheet() {
                   <div className="columnHeader" key={column}>{column}</div>
                 ))}
 
-                {Array.from({ length: rowCount }, (_, rowIndex) => {
-                  const rowNumber = rowIndex + 1;
+                {rowCount > 200 && gridWindowStart > 0 && (
+                  <div className="gridRowSpacer" style={{ height: gridWindowStart * 26 }} />
+                )}
+                {Array.from(
+                  { length: rowCount > 200 ? Math.min(100, rowCount - gridWindowStart) : rowCount },
+                  (_, rowIndex) => {
+                  const rowNumber = (rowCount > 200 ? gridWindowStart : 0) + rowIndex + 1;
                   return (
                     <Row
                       columns={columns}
@@ -1332,6 +1352,9 @@ export function VariableSheet() {
                     />
                   );
                 })}
+                {rowCount > 200 && gridWindowStart + 100 < rowCount && (
+                  <div className="gridRowSpacer" style={{ height: (rowCount - gridWindowStart - 100) * 26 }} />
+                )}
               </div>
             </section>
 
@@ -1341,8 +1364,7 @@ export function VariableSheet() {
                 closeInspector={() => setIsInspectorOpen(false)}
                 dependencySummary={dependencySummary}
                 displayValue={displayValues[selectedAddress] ?? ""}
-                dropdownOptionsDraft={dropdownOptionsDraft}
-                setDropdownOptionsDraft={setDropdownOptionsDraft}
+                contextKey={`${activeSheetId}:${selectedAddress}`}
                 selectedAddress={selectedAddress}
                 selectedCell={selectedCell}
                 selectedIssues={selectedIssues}
@@ -1357,7 +1379,7 @@ export function VariableSheet() {
         <RunnerPreview
           backToSheet={() => setActiveView("sheet")}
           configName={configName}
-          hasRunnerOverrides={Object.keys(runnerOverrides).length > 0}
+          hasRunnerOverrides={hasRunnerOverrides}
           resetRunnerPreview={resetRunnerPreview}
           runnerSheets={runnerSheets}
           updateRunnerCell={updateRunnerCell}
@@ -1370,68 +1392,64 @@ export function VariableSheet() {
   );
 }
 
-function CommandMenu({ children, label }: { children: ReactNode; label: string }) {
-  return (
-    <details
-      className="commandMenu"
-      onClick={(event) => {
-        if ((event.target as HTMLElement).closest("button")) event.currentTarget.removeAttribute("open");
-      }}
-    >
-      <summary>{label}</summary>
-      <div>{children}</div>
-    </details>
-  );
+function DraftInput({ contextKey, onCommit, value, ...props }: {
+  contextKey: string;
+  onCommit: (value: string) => void;
+  value: string;
+} & Omit<ComponentProps<"input">, "onChange" | "onBlur" | "value">) {
+  const [draft, setDraft] = useState(value);
+  const draftRef = useRef(draft);
+  const initialRef = useRef(value);
+  const commitRef = useRef(onCommit);
+  draftRef.current = draft;
+  commitRef.current = onCommit;
+
+  useEffect(() => {
+    setDraft(value);
+    draftRef.current = value;
+    initialRef.current = value;
+    return () => {
+      if (draftRef.current !== initialRef.current) commitRef.current(draftRef.current);
+    };
+  }, [contextKey, value]);
+
+  function commit() {
+    if (draftRef.current === initialRef.current) return;
+    commitRef.current(draftRef.current);
+    initialRef.current = draftRef.current;
+  }
+
+  return <input {...props} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} />;
 }
 
-function SheetStrip({
-  activeSheetId,
-  addSheet,
-  renameSheet,
-  sheets,
-  switchSheet,
-}: {
-  activeSheetId: string;
-  addSheet: () => void;
-  renameSheet: (sheetId: string, name: string) => void;
-  sheets: WorkbookSheet[];
-  switchSheet: (sheetId: string) => void;
-}) {
-  const activeSheet = sheets.find((sheet) => sheet.id === activeSheetId) ?? sheets[0];
+function DraftTextarea({ contextKey, onCommit, value, ...props }: {
+  contextKey: string;
+  onCommit: (value: string) => void;
+  value: string;
+} & Omit<ComponentProps<"textarea">, "onChange" | "onBlur" | "value">) {
+  const [draft, setDraft] = useState(value);
+  const draftRef = useRef(draft);
+  const initialRef = useRef(value);
+  const commitRef = useRef(onCommit);
+  draftRef.current = draft;
+  commitRef.current = onCommit;
 
-  return (
-    <aside className="sheetStrip" aria-label="Sheets">
-      <div className="sheetStripHeader">Sheets</div>
-      <div className="sheetStripList" role="tablist" aria-label="Workbook sheets">
-        {sheets.map((sheet) => (
-          <button
-            key={sheet.id}
-            type="button"
-            data-active={sheet.id === activeSheetId}
-            onClick={() => switchSheet(sheet.id)}
-            role="tab"
-            aria-selected={sheet.id === activeSheetId}
-            title={sheet.name}
-          >
-            <span>{sheet.name}</span>
-            <small>{Object.keys(sheet.cells).length} cells</small>
-          </button>
-        ))}
-      </div>
-      <button type="button" className="sheetAddButton" onClick={addSheet}>
-        Add Sheet
-      </button>
-      {activeSheet && (
-        <label className="sheetRename">
-          <span>Active Sheet</span>
-          <input
-            value={activeSheet.name}
-            onChange={(event) => renameSheet(activeSheet.id, event.target.value)}
-          />
-        </label>
-      )}
-    </aside>
-  );
+  useEffect(() => {
+    setDraft(value);
+    draftRef.current = value;
+    initialRef.current = value;
+    return () => {
+      if (draftRef.current !== initialRef.current) commitRef.current(draftRef.current);
+    };
+  }, [contextKey, value]);
+
+  function commit() {
+    if (draftRef.current === initialRef.current) return;
+    commitRef.current(draftRef.current);
+    initialRef.current = draftRef.current;
+  }
+
+  return <textarea {...props} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} />;
 }
 
 function Inspector({
@@ -1439,11 +1457,10 @@ function Inspector({
   closeInspector,
   dependencySummary,
   displayValue,
-  dropdownOptionsDraft,
+  contextKey,
   selectedAddress,
   selectedCell,
   selectedIssues,
-  setDropdownOptionsDraft,
   updateCell,
   updateLookup,
   visibilityControls,
@@ -1452,11 +1469,10 @@ function Inspector({
   closeInspector: () => void;
   dependencySummary: DependencySummary;
   displayValue: CellValue;
-  dropdownOptionsDraft: string;
+  contextKey: string;
   selectedAddress: string;
   selectedCell: GridCell;
   selectedIssues: string[];
-  setDropdownOptionsDraft: (value: string) => void;
   updateCell: (address: string, patch: Partial<GridCell>) => void;
   updateLookup: (patch: Partial<LookupConfig>) => void;
   visibilityControls: VisibilityControlOption[];
@@ -1504,11 +1520,12 @@ function Inspector({
 
         <label>
           Smart Cell Name
-          <input
+          <DraftInput
+            contextKey={`${contextKey}:name`}
             placeholder="example: wall_height"
             value={selectedCell.name}
-            onChange={(event) => {
-              const name = sanitizeName(event.target.value);
+            onCommit={(value) => {
+              const name = sanitizeName(value);
               updateCell(selectedAddress, {
                 name,
                 surfaced: name ? selectedCell.surfaced : false,
@@ -1574,7 +1591,6 @@ function Inspector({
                       const options = inputControl === "dropdown" && selectedCell.inputOptions.length === 0 && selectedCell.entry.trim()
                         ? [selectedCell.entry.trim()]
                         : selectedCell.inputOptions;
-                      setDropdownOptionsDraft(options.join("\n"));
                       updateCell(selectedAddress, {
                         inputControl,
                         inputOptions: inputControl === "dropdown" ? options : [],
@@ -1591,14 +1607,10 @@ function Inspector({
                 {selectedCell.inputControl === "dropdown" && (
                   <label>
                     Dropdown Options
-                    <textarea
-                      value={dropdownOptionsDraft}
-                      onBlur={() => setDropdownOptionsDraft(splitInputOptions(dropdownOptionsDraft).join("\n"))}
-                      onChange={(event) => {
-                        const draft = event.target.value;
-                        setDropdownOptionsDraft(draft);
-                        updateCell(selectedAddress, { inputOptions: splitInputOptions(draft) });
-                      }}
+                    <DraftTextarea
+                      contextKey={`${contextKey}:options`}
+                      value={selectedCell.inputOptions.join("\n")}
+                      onCommit={(value) => updateCell(selectedAddress, { inputOptions: splitInputOptions(value) })}
                       placeholder="One short option per line, or comma-separated. Leave blank for free text."
                       rows={3}
                     />
@@ -1627,17 +1639,19 @@ function Inspector({
               <div className="nestedDisclosureBody">
               <label>
                 Display Label
-                <input
+                <DraftInput
+                  contextKey={`${contextKey}:label`}
                   placeholder={prettifyName(selectedCell.name)}
                   value={selectedCell.label}
-                  onChange={(event) => updateCell(selectedAddress, { label: event.target.value })}
+                  onCommit={(value) => updateCell(selectedAddress, { label: value })}
                 />
               </label>
               <label>
                 Runner Section
-                <input
+                <DraftInput
+                  contextKey={`${contextKey}:section`}
                   value={selectedCell.runnerSection}
-                  onChange={(event) => updateCell(selectedAddress, { runnerSection: event.target.value })}
+                  onCommit={(value) => updateCell(selectedAddress, { runnerSection: value })}
                   placeholder="Example: Dormers"
                 />
               </label>
@@ -1685,9 +1699,10 @@ function Inspector({
             <div className="nestedDisclosureBody">
               <label>
                 Internal Annotation
-                <textarea
+                <DraftTextarea
+                  contextKey={`${contextKey}:annotation`}
                   value={selectedCell.annotation}
-                  onChange={(event) => updateCell(selectedAddress, { annotation: event.target.value })}
+                  onCommit={(value) => updateCell(selectedAddress, { annotation: value })}
                   placeholder="Internal note about what this cell means"
                   rows={4}
                 />
@@ -1696,9 +1711,10 @@ function Inspector({
           {(selectedCell.role === "validation" || selectedCell.role === "compliance") && (
             <label>
               Runner Message
-              <textarea
+              <DraftTextarea
+                contextKey={`${contextKey}:ruleMessage`}
                 value={selectedCell.ruleMessage}
-                onChange={(event) => updateCell(selectedAddress, { ruleMessage: event.target.value })}
+                onCommit={(value) => updateCell(selectedAddress, { ruleMessage: value })}
                 placeholder={selectedCell.role === "validation" ? "Example: Input is outside the approved range." : "Example: Manual review is recommended."}
                 rows={3}
               />
@@ -2513,10 +2529,6 @@ function hydrateCells(cells: Record<string, GridCell>): Record<string, GridCell>
   );
 }
 
-function cloneCells(cells: Record<string, GridCell>): Record<string, GridCell> {
-  return JSON.parse(JSON.stringify(cells)) as Record<string, GridCell>;
-}
-
 function runnerOverrideKey(sheetId: string, address: string): string {
   return `${sheetId}!${address}`;
 }
@@ -2602,28 +2614,16 @@ function referencesForAddress(cell: GridCell): string[] {
 }
 
 function referencesForFormula(entry: string): string[] {
-  const rawExpression = entry.trim().startsWith("=") ? entry.trim().slice(1) : entry;
-  const expression = stripCrossSheetReferences(rawExpression).replace(/"[^"]*"/g, " ");
   const refs = new Set<string>();
-
-  for (const range of expression.matchAll(/\b([A-Z]+[1-9]\d*)\s*:\s*([A-Z]+[1-9]\d*)\b/g)) {
-    const expanded = expandAddressRange(range[1], range[2]);
-    for (const address of expanded) refs.add(address);
+  for (const reference of parseFormula(entry).references) {
+    if (reference.sheetName) continue;
+    if (reference.kind === "name") refs.add(reference.raw);
+    if (reference.kind === "cell" && reference.address) refs.add(reference.address.replace(/\$/g, "").toUpperCase());
+    if (reference.kind === "range" && reference.address && reference.rangeEnd) {
+      for (const address of expandAddressRange(reference.address.replace(/\$/g, ""), reference.rangeEnd.replace(/\$/g, ""))) refs.add(address);
+    }
   }
-
-  for (const match of expression.replace(/\b([A-Z]+[1-9]\d*)\s*:\s*([A-Z]+[1-9]\d*)\b/g, " ").matchAll(/\b[A-Za-z_][A-Za-z0-9_]*\b/g)) {
-    const token = match[0];
-    if (isFormulaKeyword(token)) continue;
-    refs.add(token);
-  }
-
   return [...refs];
-}
-
-function stripCrossSheetReferences(expression: string): string {
-  return expression
-    .replace(/'((?:[^']|'')+)'\!\$?[A-Z]+\$?[1-9]\d*(?:\s*:\s*\$?[A-Z]+\$?[1-9]\d*)?/gi, " ")
-    .replace(/\b[A-Za-z_][A-Za-z0-9_]*\!\$?[A-Z]+\$?[1-9]\d*(?:\s*:\s*\$?[A-Z]+\$?[1-9]\d*)?/g, " ");
 }
 
 function expandAddressRange(start: string, end: string): string[] {
@@ -2646,35 +2646,6 @@ function expandAddressRange(start: string, end: string): string[] {
   return addresses;
 }
 
-function isFormulaKeyword(token: string): boolean {
-  return new Set([
-    "SUM",
-    "sum",
-    "AVERAGE",
-    "average",
-    "mean",
-    "MAX",
-    "max",
-    "MIN",
-    "min",
-    "ROUND",
-    "round",
-    "ABS",
-    "abs",
-    "SQRT",
-    "sqrt",
-    "CEIL",
-    "ceil",
-    "FLOOR",
-    "floor",
-    "IF",
-    "if",
-    "true",
-    "false",
-    "LOOKUP",
-  ]).has(token);
-}
-
 function dependencyItem(cell: GridCell, reference: string): DependencyItem {
   return {
     address: cell.address,
@@ -2691,14 +2662,6 @@ function dedupeDependencyItems(items: DependencyItem[]): DependencyItem[] {
     seen.add(key);
     return true;
   });
-}
-
-function makeSnapshot(cells: Record<string, GridCell>, columnCount: number, rowCount: number): SheetSnapshot {
-  return {
-    cells: cloneCells(cells),
-    columnCount,
-    rowCount,
-  };
 }
 
 function insertRow(cells: Record<string, GridCell>, insertAt: number): Record<string, GridCell> {
@@ -2798,23 +2761,12 @@ function renameSheetReferences(cells: Record<string, GridCell>, oldName: string,
 
 function replaceSheetNameInFormula(entry: string, oldName: string, newName: string): string {
   if (!entry.includes("!")) return entry;
-  const nextPrefix = sheetReferencePrefix(newName);
-  const escapedQuotedName = escapeRegExp(oldName.replace(/'/g, "''"));
-  const escapedPlainName = escapeRegExp(oldName);
-
-  return entry
-    .replace(new RegExp(`'${escapedQuotedName}'!`, "g"), `${nextPrefix}!`)
-    .replace(new RegExp(`\\b${escapedPlainName}!`, "g"), `${nextPrefix}!`);
-}
-
-function sheetReferencePrefix(sheetName: string): string {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheetName)
-    ? sheetName
-    : `'${sheetName.replace(/'/g, "''")}'`;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return rewriteFormula(entry, (reference) => {
+    if (reference.sheetName?.toLowerCase() !== oldName.toLowerCase()) return null;
+    const start = reference.address ?? "";
+    const range = reference.rangeEnd ? `:${reference.rangeEnd}` : "";
+    return `${quoteFormulaSheetName(newName)}!${start}${range}`;
+  });
 }
 
 function shiftInsertedRowReferences(entry: string, insertAt: number): string {
@@ -2844,7 +2796,15 @@ function shiftDeletedColumnReferences(entry: string, deleteAt: number): string {
 }
 
 function replaceFormulaReferences(entry: string, replacer: (column: string, row: number) => string): string {
-  return entry.replace(/\b([A-Z]+)([1-9]\d*)\b/g, (_match, column: string, row: string) => replacer(column, Number(row)));
+  return rewriteFormula(entry, (reference) => {
+    if (reference.sheetName || reference.kind === "name" || !reference.address) return null;
+    const replaceAddress = (address: string) => {
+      const parsed = parseAddress(address.replace(/\$/g, ""));
+      return parsed ? replacer(parsed.column, parsed.row) : address;
+    };
+    const start = replaceAddress(reference.address);
+    return reference.rangeEnd ? `${start}:${replaceAddress(reference.rangeEnd)}` : start;
+  });
 }
 
 function normalizeLookupInputs(lookup: LookupConfig): Array<{ column: string; reference: string }> {
@@ -2869,9 +2829,6 @@ function hydrateConfigurations(configurations: LocalConfiguration[]): LocalConfi
         name: configuration.name || "Untitled Configuration",
         activeSheetId: activeSheet.id,
         sheets,
-        cells: activeSheet.cells,
-        columnCount: activeSheet.columnCount,
-        rowCount: activeSheet.rowCount,
         updatedAt: configuration.updatedAt || new Date().toISOString(),
       };
     });
@@ -2898,15 +2855,14 @@ function makeConfiguration(
   rowCount = defaultRowCount,
   workbook?: { sheets: WorkbookSheet[]; activeSheetId: string },
 ): LocalConfiguration {
-  const activeSheet = workbook?.sheets.find((sheet) => sheet.id === workbook.activeSheetId) ?? workbook?.sheets[0];
+  const sheets = workbook?.sheets.map(hydrateWorkbookSheet)
+    ?? [makeWorkbookSheet("Sheet 1", cells, columnCount, rowCount)];
+  const activeSheet = sheets.find((sheet) => sheet.id === workbook?.activeSheetId) ?? sheets[0];
   return {
     id: makeConfigId(),
     name,
     activeSheetId: activeSheet?.id,
-    sheets: workbook?.sheets.map(hydrateWorkbookSheet),
-    cells: hydrateCells(activeSheet?.cells ?? cells),
-    columnCount: Math.max(activeSheet?.columnCount ?? columnCount, defaultColumnCount),
-    rowCount: Math.max(activeSheet?.rowCount ?? rowCount, defaultRowCount),
+    sheets,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -3333,11 +3289,17 @@ function splitInputOptions(value: string): string[] {
 }
 
 function adjustFormulaReferences(entry: string, rowOffset: number, columnOffset: number): string {
-  return entry.replace(/\b([A-Z]+)([1-9]\d*)\b/g, (match, column: string, row: string) => {
-    const nextColumn = columnName(columnNumber(column) + columnOffset);
-    const nextRow = Number(row) + rowOffset;
-    if (!nextColumn || nextRow < 1) return match;
-    return `${nextColumn}${nextRow}`;
+  return rewriteFormula(entry, (reference) => {
+    if (reference.sheetName || reference.kind === "name" || !reference.address) return null;
+    const adjust = (address: string) => {
+      const parsed = parseAddress(address.replace(/\$/g, ""));
+      if (!parsed) return address;
+      const nextColumn = columnName(columnNumber(parsed.column) + columnOffset);
+      const nextRow = parsed.row + rowOffset;
+      return !nextColumn || nextRow < 1 ? address : `${nextColumn}${nextRow}`;
+    };
+    const start = adjust(reference.address);
+    return reference.rangeEnd ? `${start}:${adjust(reference.rangeEnd)}` : start;
   });
 }
 

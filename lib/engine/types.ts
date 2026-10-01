@@ -57,6 +57,8 @@ export interface WorkbookEngineInput {
 export interface EngineIssue {
   cellId: string;
   address: string;
+  sheetId?: string;
+  sheetName?: string;
   name?: string | null;
   message: string;
 }
