@@ -227,16 +227,29 @@ h1 {
 }
 
 .status strong,
-.status span {
+.status span,
+.statusIssue {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.status span {
+.status span,
+.statusIssue {
   font-size: 11px;
   font-weight: 600;
+}
+
+.statusIssue {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  max-width: 100%;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
 }
 
 .importPanel {
@@ -427,7 +440,8 @@ h1 {
 .spreadsheetFrame {
   background: var(--sheet);
   border: 1px solid var(--line-strong);
-  overflow-x: auto;
+  max-height: calc(100vh - 230px);
+  overflow: auto;
   position: relative;
   width: 100%;
 }
@@ -1851,6 +1865,13 @@ h1 {
 .helpTableScroll {
   overflow-x: auto;
   padding: 0 !important;
+}
+
+.spreadsheetGrid > .gridRowSpacer {
+  border: 0;
+  grid-column: 1 / -1;
+  min-height: 0;
+  padding: 0;
 }
 
 .helpFunctionTable {

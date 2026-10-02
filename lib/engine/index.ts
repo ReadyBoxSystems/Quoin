@@ -1,4 +1,5 @@
 import { all, create, type MathJsInstance, type MathNode } from "mathjs";
+import { rewriteFormula } from "@/lib/formula/model";
 import type {
   CellValue,
   EngineCell,
@@ -1032,26 +1033,52 @@ function normalizeValue(value: unknown): CellValue {
 }
 
 function topologicalSort(cells: EngineCell[], dependencies: Map<string, Set<string>>) {
-  const visited = new Set<string>();
-  const visiting = new Set<string>();
+  let nextIndex = 0;
+  const indexes = new Map<string, number>();
+  const lowLinks = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
   const cycleIds = new Set<string>();
-  const order: string[] = [];
+  const strongConnect = (id: string) => {
+    indexes.set(id, nextIndex);
+    lowLinks.set(id, nextIndex);
+    nextIndex++;
+    stack.push(id);
+    onStack.add(id);
 
-  const visit = (id: string) => {
-    if (visiting.has(id)) {
-      cycleIds.add(id);
-      return;
+    for (const dependency of dependencies.get(id) ?? []) {
+      if (!indexes.has(dependency)) {
+        strongConnect(dependency);
+        lowLinks.set(id, Math.min(lowLinks.get(id)!, lowLinks.get(dependency)!));
+      } else if (onStack.has(dependency)) {
+        lowLinks.set(id, Math.min(lowLinks.get(id)!, indexes.get(dependency)!));
+      }
     }
-    if (visited.has(id)) return;
 
-    visiting.add(id);
-    for (const dep of dependencies.get(id) ?? []) visit(dep);
-    visiting.delete(id);
-    visited.add(id);
-    order.push(id);
+    if (lowLinks.get(id) !== indexes.get(id)) return;
+    const component: string[] = [];
+    let member: string;
+    do {
+      member = stack.pop()!;
+      onStack.delete(member);
+      component.push(member);
+    } while (member !== id);
+    if (component.length > 1 || dependencies.get(id)?.has(id)) {
+      for (const cycleId of component) cycleIds.add(cycleId);
+    }
   };
 
-  for (const cell of cells) visit(cell.id);
+  for (const cell of cells) if (!indexes.has(cell.id)) strongConnect(cell.id);
+
+  const visited = new Set<string>();
+  const order: string[] = [];
+  const visitForOrder = (id: string) => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    for (const dependency of dependencies.get(id) ?? []) visitForOrder(dependency);
+    order.push(id);
+  };
+  for (const cell of cells) visitForOrder(cell.id);
 
   return { order, cycleIds };
 }
@@ -1088,6 +1115,8 @@ function duplicateNameIssues(sheets: WorkbookEngineSheet[], duplicateNames: stri
       issues.push({
         cellId: scopedCellId(sheet.id, cell.id),
         address: cell.address,
+        sheetId: sheet.id,
+        sheetName: sheet.name,
         name: cell.name,
         message: `Duplicate Smart Cell name "${cell.name}" appears on more than one Sheet. Rename one before using workbook-level formulas.`,
       });
@@ -1156,48 +1185,17 @@ function transformWorkbookExpression(
   currentSheetIndex: number,
   sheetLookup: Map<string, { sheet: WorkbookEngineSheet; index: number }>,
 ): string {
-  let next = expression;
-
-  next = next.replace(
-    /'((?:[^']|'')+)'\!\$?([A-Z]+)\$?([1-9]\d*)\s*:\s*\$?([A-Z]+)\$?([1-9]\d*)/gi,
-    (match, sheetName: string, startColumn: string, startRow: string, endColumn: string, endRow: string) => {
-      return scopedRangeForSheet(unescapeSheetName(sheetName), `${startColumn}${startRow}`, `${endColumn}${endRow}`, sheetLookup) ?? match;
-    },
-  );
-
-  next = next.replace(
-    /\b([A-Za-z_][A-Za-z0-9_]*)\!\$?([A-Z]+)\$?([1-9]\d*)\s*:\s*\$?([A-Z]+)\$?([1-9]\d*)/g,
-    (match, sheetName: string, startColumn: string, startRow: string, endColumn: string, endRow: string) => {
-      return scopedRangeForSheet(sheetName, `${startColumn}${startRow}`, `${endColumn}${endRow}`, sheetLookup) ?? match;
-    },
-  );
-
-  next = next.replace(
-    /'((?:[^']|'')+)'\!\$?([A-Z]+)\$?([1-9]\d*)/gi,
-    (match, sheetName: string, column: string, row: string) => {
-      return scopedAddressForSheet(unescapeSheetName(sheetName), `${column}${row}`, sheetLookup) ?? match;
-    },
-  );
-
-  next = next.replace(
-    /\b([A-Za-z_][A-Za-z0-9_]*)\!\$?([A-Z]+)\$?([1-9]\d*)/g,
-    (match, sheetName: string, column: string, row: string) => {
-      return scopedAddressForSheet(sheetName, `${column}${row}`, sheetLookup) ?? match;
-    },
-  );
-
-  next = next.replace(
-    /\b\$?([A-Z]+)\$?([1-9]\d*)\s*:\s*\$?([A-Z]+)\$?([1-9]\d*)\b/g,
-    (_match, startColumn: string, startRow: string, endColumn: string, endRow: string) => {
-      return scopedRange(currentSheetIndex, `${startColumn}${startRow}`, `${endColumn}${endRow}`);
-    },
-  );
-
-  next = next.replace(/\b\$?([A-Z]+)\$?([1-9]\d*)\b/g, (_match, column: string, row: string) => {
-    return scopedAddress(currentSheetIndex, `${column}${row}`);
+  return rewriteFormula(expression, (reference) => {
+    if (reference.kind === "name" || !reference.address) return null;
+    const start = normalizeAddress(reference.address);
+    const end = reference.rangeEnd ? normalizeAddress(reference.rangeEnd) : null;
+    if (reference.sheetName) {
+      return end
+        ? scopedRangeForSheet(reference.sheetName, start, end, sheetLookup)
+        : scopedAddressForSheet(reference.sheetName, start, sheetLookup);
+    }
+    return end ? scopedRange(currentSheetIndex, start, end) : scopedAddress(currentSheetIndex, start);
   });
-
-  return next;
 }
 
 function scopedAddressForSheet(
@@ -1225,10 +1223,6 @@ function scopedRange(sheetIndex: number, start: string, end: string): string {
   return `${scopedAddress(sheetIndex, start)}:${scopedAddress(sheetIndex, end)}`;
 }
 
-function unescapeSheetName(name: string): string {
-  return name.replace(/''/g, "'");
-}
-
 function remapWorkbookIssues(
   issues: EngineIssue[],
   cellMeta: Map<string, { sheetId: string; sheetName: string; original: EngineCell; internal: EngineCell }>,
@@ -1239,6 +1233,8 @@ function remapWorkbookIssues(
     return {
       ...item,
       address: meta.original.address,
+      sheetId: meta.sheetId,
+      sheetName: meta.sheetName,
       name: meta.original.name,
     };
   });
@@ -1269,7 +1265,7 @@ function buildWorkbookSheetResults(
       sheetId: sheet.id,
       sheetName: sheet.name,
       result: {
-        valid: result.valid && !errors.some((item) => sheetCellIds.has(item.cellId)),
+        valid: !errors.some((item) => sheetCellIds.has(item.cellId)),
         values,
         outputs,
         executionOrder: result.executionOrder.filter((id) => sheetCellIds.has(id)),
